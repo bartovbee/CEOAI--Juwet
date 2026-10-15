@@ -10,7 +10,7 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "pkg": "^5.8.1"
+    "pkg": "^6.23.0"
   },
   "pkg": {
     "assets": [
