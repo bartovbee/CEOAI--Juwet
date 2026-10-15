@@ -61,6 +61,7 @@ function createWindow() {
     width: 1180, height: 780, minWidth: 900, minHeight: 600,
     show: false, autoHideMenuBar: true, backgroundColor: '#f4f7fb',
     title: 'CEOAI Juwet',
+    icon: path.join(__dirname, '..', 'build', 'ceoai-juwet.ico'),
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
