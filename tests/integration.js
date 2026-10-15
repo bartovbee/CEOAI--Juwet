@@ -137,6 +137,12 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(second.body, 'origin-response-1');
     assert.strictEqual(originCount, 1, 'cache HIT should not request upstream again');
 
+    const clientList = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/clients' });
+    assert.strictEqual(clientList.status, 200);
+    const clientData = JSON.parse(clientList.body);
+    assert(clientData.clients.some(client => client.ip === '127.0.0.1'), 'client monitor should track proxy source IP');
+    assert(clientData.clients.find(client => client.ip === '127.0.0.1').requests >= 2, 'client monitor should count requests');
+
     const rewrite = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/rewrite', method: 'POST',
       headers: { 'content-type': 'application/json' }
