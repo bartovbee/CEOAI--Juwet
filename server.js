@@ -4,6 +4,7 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 
 const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -398,5 +399,13 @@ proxy.on('connect', (req, client, head) => {
   client.on('error', () => upstream.destroy());
 });
 proxy.listen(PROXY_PORT, '0.0.0.0', () => console.log('CEOAI Juwet proxy listening on ' + PROXY_PORT));
+if (process.pkg && process.platform === 'win32' && process.env.CEOAI_OPEN_BROWSER !== '0') {
+  const openTimer = setTimeout(() => {
+    execFile('cmd.exe', ['/c', 'start', '', 'http://127.0.0.1:' + DASHBOARD_PORT], { windowsHide: true }, error => {
+      if (error) log('dashboard-browser-open-error', { error: error.message });
+    });
+  }, 900);
+  openTimer.unref();
+}
 function stop() { proxy.close(); dashboard.close(); process.exit(0); }
 process.on('SIGINT', stop); process.on('SIGTERM', stop);
