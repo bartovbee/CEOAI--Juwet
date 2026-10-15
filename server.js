@@ -36,6 +36,22 @@ const stats = {
   requests: 0, hits: 0, misses: 0, bypass: 0, blocked: 0,
   bytesIn: 0, bytesOut: 0, offlineMisses: 0, startedAt: new Date().toISOString(), recent: []
 };
+const clientStats = new Map();
+function recordClient(req, kind = 'HTTP') {
+  let ip = req.socket && req.socket.remoteAddress || 'unknown';
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  const now = new Date().toISOString();
+  const item = clientStats.get(ip) || { ip, requests: 0, httpRequests: 0, connectRequests: 0, firstSeen: now, lastSeen: now, lastType: kind };
+  item.requests++;
+  if (kind === 'CONNECT') item.connectRequests++; else item.httpRequests++;
+  item.lastSeen = now; item.lastType = kind;
+  clientStats.set(ip, item);
+  // Keep the monitor bounded for long-running portable instances.
+  if (clientStats.size > 500) {
+    const oldest = [...clientStats.values()].sort((a, b) => Date.parse(a.lastSeen) - Date.parse(b.lastSeen))[0];
+    if (oldest) clientStats.delete(oldest.ip);
+  }
+}
 function log(type, detail = {}) {
   const item = { time: new Date().toISOString(), type, ...detail };
   stats.recent.unshift(item);
@@ -122,6 +138,10 @@ function handleApi(req, res, pathname) {
       httpsMode: 'CONNECT tunnel (TLS payload not inspected)',
       stats, cache, config: readJson(files.config, {})
     });
+  }
+  if (pathname === '/api/clients' && req.method === 'GET') {
+    const clients = [...clientStats.values()].sort((a, b) => Date.parse(b.lastSeen) - Date.parse(a.lastSeen));
+    return jsonResponse(res, 200, { clients, trackedClients: clients.length, limit: 500 });
   }
   if (pathname === '/api/config' && req.method === 'GET') {
     return jsonResponse(res, 200, readJson(files.config, {}));
@@ -261,6 +281,7 @@ function cleanHeaders(headers) {
 }
 function proxyRequest(req, res) {
   stats.requests++;
+  recordClient(req, 'HTTP');
   let original;
   try {
     original = new URL(req.url);
@@ -372,6 +393,7 @@ function proxyRequest(req, res) {
 const proxy = http.createServer(proxyRequest);
 proxy.on('connect', (req, client, head) => {
   stats.requests++;
+  recordClient(req, 'CONNECT');
   const split = req.url.lastIndexOf(':');
   const host = normalizeHost(split >= 0 ? req.url.slice(0, split) : req.url);
   const port = split >= 0 ? Number(req.url.slice(split + 1)) : 443;
