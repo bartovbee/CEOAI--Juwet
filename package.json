@@ -6,11 +6,11 @@
   "scripts": {
     "start": "node server.js",
     "test": "node tests/smoke.js",
-    "build:windows": "pkg server.js --targets node22-win-x64 --output dist/CEOAI-Juwet.exe"
+    "build:windows": "pkg server.js --targets node18-win-x64 --output dist/CEOAI-Juwet.exe"
   },
   "dependencies": {},
   "devDependencies": {
-    "pkg": "^6.23.0"
+    "pkg": "5.8.1"
   },
   "pkg": {
     "assets": [
