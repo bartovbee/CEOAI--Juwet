@@ -68,6 +68,17 @@ function jsonResponse(res, status, value) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(value));
 }
+function serveAsset(res, name, contentType) {
+  try {
+    const data = fs.readFileSync(path.join(PUBLIC_DIR, name));
+    res.writeHead(200, { 'content-type': contentType, 'content-length': data.length, 'cache-control': 'no-store' });
+    res.end(data);
+  } catch (error) {
+    log('asset-read-error', { name, error: error.message });
+    res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end('Dashboard asset unavailable: ' + name);
+  }
+}
 function cleanExpiredCache() {
   let removed = 0;
   for (const name of fs.readdirSync(CACHE_DIR)) {
@@ -217,14 +228,8 @@ const dashboard = http.createServer((req, res) => {
     if (handled !== false) return;
     return jsonResponse(res, 404, { ok: false, error: 'API route not found' });
   }
-  if (url.pathname === '/logo.svg') {
-    res.writeHead(200, { 'content-type': 'image/svg+xml' });
-    return fs.createReadStream(path.join(PUBLIC_DIR, 'logo.svg')).pipe(res);
-  }
-  if (url.pathname === '/' || url.pathname === '/index.html') {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    return fs.createReadStream(path.join(PUBLIC_DIR, 'index.html')).pipe(res);
-  }
+  if (url.pathname === '/logo.svg') return serveAsset(res, 'logo.svg', 'image/svg+xml');
+  if (url.pathname === '/' || url.pathname === '/index.html') return serveAsset(res, 'index.html', 'text/html; charset=utf-8');
   res.writeHead(404); res.end('Not found');
 });
 dashboard.listen(DASHBOARD_PORT, '127.0.0.1', () => console.log('CEOAI Juwet dashboard http://127.0.0.1:' + DASHBOARD_PORT));
