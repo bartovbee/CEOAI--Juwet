@@ -1,6 +1,6 @@
 # CEOAI Juwet
 
-CEOAI Juwet adalah aplikasi proxy HTTP/HTTPS dengan dashboard monitor terpadu, cache lokal, filter domain, rewrite URL, dan cache cleaner. HandyCache yang diberikan pemilik proyek digunakan sebagai **referensi konsep/alur fitur**, bukan sebagai sumber kode yang disalin.
+CEOAI Juwet adalah aplikasi desktop Windows satu jendela (tanpa browser/dashboard terpisah) untuk proxy HTTP/HTTPS, cache lokal, filter domain, rewrite URL, dan cache cleaner. HandyCache yang diberikan pemilik proyek digunakan sebagai **referensi konsep/alur fitur**, bukan sebagai sumber kode yang disalin.
 
 ## Fitur yang dibangun ulang dari konsep referensi
 
@@ -17,6 +17,10 @@ CEOAI Juwet adalah aplikasi proxy HTTP/HTTPS dengan dashboard monitor terpadu, c
 HTTPS bekerja sebagai **CONNECT tunnel**. Versi ini tidak mendekripsi atau menyimpan payload HTTPS; browser tetap memvalidasi TLS situs tujuan. Cache hanya digunakan untuk request HTTP GET yang tidak memakai cookie/authorization dan tidak dilarang oleh header cache server. TLS upstream tidak dimatikan.
 
 Proxy mendengarkan pada semua interface jaringan agar perangkat LAN dapat menggunakannya. Gunakan hanya pada jaringan tepercaya; versi awal belum menyediakan autentikasi proxy. Dashboard dibatasi ke localhost.
+
+## Aplikasi Windows
+
+Jalankan `CEOAI-Juwet.exe`. Jendela aplikasi terbuka langsung dan menampilkan monitor serta kontrol di dalam satu aplikasi; tidak perlu membuka dashboard secara manual di browser. Proxy menggunakan port `8080`, dashboard lokal internal `8787`.
 
 ## Menjalankan dari source
 
