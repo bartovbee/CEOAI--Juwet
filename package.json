@@ -35,7 +35,8 @@
       "desktop/**/*",
       "server.js",
       "public/**/*",
-      "package.json"
+      "package.json",
+      "build/**/*"
     ],
     "asar": true,
     "win": {
