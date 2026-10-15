@@ -107,7 +107,21 @@ function testConnectTunnel(proxyPort, echoPort) {
   let originCount = 0;
   const origin = http.createServer((req, res) => {
     originCount++;
-    res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'public, max-age=60' });
+    const policies = {
+      private: 'private, max-age=60',
+      'no-store': 'no-store, max-age=60',
+      'no-cache': 'no-cache, max-age=60',
+      'must-revalidate': 'public, max-age=60, must-revalidate',
+      'no-freshness': ''
+    };
+    const policy = policies[req.url.slice(1)];
+    const headers = { 'content-type': 'text/plain' };
+    if (policy !== undefined) {
+      if (policy) headers['cache-control'] = policy;
+    } else {
+      headers['cache-control'] = 'public, max-age=60';
+    }
+    res.writeHead(200, headers);
     res.end('origin-response-' + originCount);
   });
   const originPort = await listen(origin);
@@ -137,6 +151,30 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(second.body, 'origin-response-1');
     assert.strictEqual(originCount, 1, 'cache HIT should not request upstream again');
 
+    const forcedRefresh = await httpRequest({
+      host: '127.0.0.1', port: proxyPort,
+      path: 'http://127.0.0.1:' + originPort + '/cache-me',
+      headers: { host: '127.0.0.1:' + originPort, 'cache-control': 'no-cache' }
+    });
+    assert.strictEqual(forcedRefresh.status, 200);
+    assert.strictEqual(forcedRefresh.headers['x-ceoai-cache'], 'BYPASS');
+    assert.strictEqual(forcedRefresh.body, 'origin-response-2');
+    const afterBypass = await proxyGet(proxyPort, originPort, 'cache-me');
+    assert.strictEqual(afterBypass.headers['x-ceoai-cache'], 'HIT');
+    assert.strictEqual(afterBypass.body, 'origin-response-1');
+    assert.strictEqual(originCount, 2, 'request no-cache must bypass cache and preserve existing object');
+
+    for (const pathName of ['private', 'no-store', 'no-cache', 'must-revalidate', 'no-freshness']) {
+      const before = originCount;
+      const firstPolicyRequest = await proxyGet(proxyPort, originPort, pathName);
+      assert.strictEqual(firstPolicyRequest.status, 200, pathName + ' first request should succeed');
+      assert.strictEqual(firstPolicyRequest.headers['x-ceoai-cache'], 'MISS');
+      const secondPolicyRequest = await proxyGet(proxyPort, originPort, pathName);
+      assert.strictEqual(secondPolicyRequest.status, 200, pathName + ' second request should succeed');
+      assert.strictEqual(secondPolicyRequest.headers['x-ceoai-cache'], 'MISS', pathName + ' response must not be stored');
+      assert.strictEqual(originCount, before + 2, pathName + ' should reach origin for both requests');
+    }
+
     const clientList = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/clients' });
     assert.strictEqual(clientList.status, 200);
     const clientData = JSON.parse(clientList.body);
@@ -151,7 +189,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const rewritten = await proxyGet(proxyPort, originPort, 'rewrite-me');
     assert.strictEqual(rewritten.status, 200);
     assert.strictEqual(rewritten.headers['x-ceoai-cache'], 'HIT');
-    assert.strictEqual(originCount, 1, 'rewrite rule should map URL onto cached object');
+    assert.strictEqual(originCount, 7, 'rewrite rule should map URL onto cached object without another origin request');
 
     const addBlock = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/blocked', method: 'POST',
@@ -170,7 +208,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const offlineMiss = await proxyGet(proxyPort, originPort, 'offline-miss');
     assert.strictEqual(offlineMiss.status, 504);
     assert.strictEqual(offlineMiss.headers['x-ceoai-cache'], 'OFFLINE-MISS');
-    assert.strictEqual(originCount, 1, 'offline mode must not contact upstream');
+    assert.strictEqual(originCount, 7, 'offline mode must not contact upstream');
 
     await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
@@ -204,7 +242,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const logs = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/logs' });
     assert.strictEqual(logs.status, 200);
     assert(logs.body.includes('HIT'));
-    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, rewrite, block/allow filters, offline-only mode, cache cleaner, HTTPS CONNECT tunnel, and logs.');
+    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, request no-cache bypass, private/no-store/no-cache/must-revalidate/no-freshness policies, rewrite, block/allow filters, offline-only mode, cache cleaner, HTTPS CONNECT tunnel, and logs.');
   } finally {
     child.kill();
     await Promise.race([new Promise(resolve => child.once('exit', resolve)), delay(2000)]);
