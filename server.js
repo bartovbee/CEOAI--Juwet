@@ -298,12 +298,12 @@ function proxyRequest(req, res) {
     });
     upstreamRes.on('end', () => {
       log(canCache ? 'MISS' : 'BYPASS', { host, url: target.origin + target.pathname, statusCode: upstreamRes.statusCode, bytes: size });
+      const cacheControl = upstreamRes.headers['cache-control'] || '';
+      const match = cacheControl.match(/(?:^|,)\s*max-age=(\d+)/i);
+      const requestedTtl = match ? Number(match[1]) : 120;
+      const mayStore = !/no-cache/i.test(cacheControl) && requestedTtl > 0;
+      const ttl = Math.min(3600, Math.max(1, requestedTtl));
       if (cacheHeadersAllowed && !tooLarge && size <= maxBytes && mayStore) {
-        const cacheControl = upstreamRes.headers['cache-control'] || '';
-        const match = cacheControl.match(/(?:^|,)\s*max-age=(\d+)/i);
-        const requestedTtl = match ? Number(match[1]) : 120;
-        const mayStore = !/no-cache/i.test(cacheControl) && requestedTtl > 0;
-        const ttl = Math.min(3600, Math.max(1, requestedTtl));
         const body = Buffer.concat(chunks);
         const storedHeaders = cleanHeaders(upstreamRes.headers);
         delete storedHeaders['set-cookie'];
