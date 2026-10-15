@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Tray, Menu, dialog, nativeImage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 let mainWindow = null;
 let tray = null;
@@ -19,8 +20,17 @@ function startLocalServer() {
   require(path.join(__dirname, '..', 'server.js'));
 }
 function makeTrayIcon() {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#fff"/><circle cx="16" cy="16" r="13" fill="none" stroke="#b51e2b" stroke-width="2.2"/><circle cx="16" cy="16" r="9.5" fill="none" stroke="#b51e2b" stroke-width="1.5"/><path d="M18 6v10c0 2-1 3-3 3h-3" fill="none" stroke="#111" stroke-width="3" stroke-linecap="round"/><path d="M16 20v7M9 19l4 4v4M23 19l-4 4v4" fill="none" stroke="#b51e2b" stroke-width="1.6" stroke-linecap="round"/></svg>';
-  return nativeImage.createFromDataURL('data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'));
+  const candidates = [
+    path.join(__dirname, '..', 'build', 'ceoai-juwet.png'),
+    path.join(__dirname, '..', 'public', 'logo.svg')
+  ];
+  for (const candidate of candidates) {
+    try {
+      const icon = nativeImage.createFromPath(candidate);
+      if (!icon.isEmpty()) return icon.resize({ width: 32, height: 32 });
+    } catch {}
+  }
+  return nativeImage.createEmpty();
 }
 function showWindow() {
   if (!mainWindow) createWindow();
