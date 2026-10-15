@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 
-const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+const APP_DIR = (process.pkg || process.versions.electron) ? path.dirname(process.execPath) : __dirname;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = process.env.CEOAI_DATA_DIR || path.join(APP_DIR, 'data');
 const CACHE_DIR = path.join(DATA_DIR, 'cache');
