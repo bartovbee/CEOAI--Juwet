@@ -3,6 +3,7 @@ const path = require('path');
 
 let mainWindow;
 let serverStarted = false;
+const DASHBOARD_PORT = Number(process.env.DASHBOARD_PORT || 8787);
 
 function startLocalServer() {
   if (serverStarted) return;
@@ -29,7 +30,7 @@ function createWindow() {
   });
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.on('closed', () => { mainWindow = null; });
-  mainWindow.loadURL('http://127.0.0.1:8787').catch(async error => {
+  mainWindow.loadURL('http://127.0.0.1:' + DASHBOARD_PORT).catch(async error => {
     await dialog.showMessageBox({
       type: 'error',
       title: 'CEOAI Juwet',
