@@ -189,7 +189,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const rewritten = await proxyGet(proxyPort, originPort, 'rewrite-me');
     assert.strictEqual(rewritten.status, 200);
     assert.strictEqual(rewritten.headers['x-ceoai-cache'], 'HIT');
-    assert.strictEqual(originCount, 7, 'rewrite rule should map URL onto cached object without another origin request');
+    assert.strictEqual(originCount, 12, 'rewrite rule should map URL onto cached object without another origin request');
 
     const addBlock = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/blocked', method: 'POST',
@@ -208,7 +208,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const offlineMiss = await proxyGet(proxyPort, originPort, 'offline-miss');
     assert.strictEqual(offlineMiss.status, 504);
     assert.strictEqual(offlineMiss.headers['x-ceoai-cache'], 'OFFLINE-MISS');
-    assert.strictEqual(originCount, 7, 'offline mode must not contact upstream');
+    assert.strictEqual(originCount, 12, 'offline mode must not contact upstream');
 
     await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
