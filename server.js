@@ -26,14 +26,14 @@ function readJson(file, fallback) {
 function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2));
 }
-if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, maxObjectBytes: 2000000, filterMode: 'block' });
+if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, cacheOnly: false, maxObjectBytes: 2000000, filterMode: 'block', autoCleanHours: 24, lastCacheCleanAt: Date.now() });
 if (!fs.existsSync(files.blocked)) writeJson(files.blocked, []);
 if (!fs.existsSync(files.allowed)) writeJson(files.allowed, []);
 if (!fs.existsSync(files.rewrites)) writeJson(files.rewrites, []);
 
 const stats = {
   requests: 0, hits: 0, misses: 0, bypass: 0, blocked: 0,
-  bytesIn: 0, bytesOut: 0, startedAt: new Date().toISOString(), recent: []
+  bytesIn: 0, bytesOut: 0, offlineMisses: 0, startedAt: new Date().toISOString(), recent: []
 };
 function log(type, detail = {}) {
   const item = { time: new Date().toISOString(), type, ...detail };
@@ -67,6 +67,24 @@ function cacheKey(url) {
 function jsonResponse(res, status, value) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(value));
+}
+function cleanExpiredCache() {
+  let removed = 0;
+  for (const name of fs.readdirSync(CACHE_DIR)) {
+    if (!name.endsWith('.json')) continue;
+    const file = path.join(CACHE_DIR, name);
+    let expired = false;
+    try { expired = Number(JSON.parse(fs.readFileSync(file, 'utf8')).expiresAt || 0) <= Date.now(); } catch { expired = true; }
+    if (expired) try { fs.unlinkSync(file); removed++; } catch {}
+  }
+  return removed;
+}
+function purgeAllCache() {
+  let removed = 0;
+  for (const name of fs.readdirSync(CACHE_DIR)) {
+    if (name.endsWith('.json')) try { fs.unlinkSync(path.join(CACHE_DIR, name)); removed++; } catch {}
+  }
+  return removed;
 }
 function getCacheSummary() {
   let objects = 0, bytes = 0, expired = 0;
@@ -106,6 +124,9 @@ function handleApi(req, res, pathname) {
         const next = {
           ...old,
           cacheEnabled: typeof input.cacheEnabled === 'boolean' ? input.cacheEnabled : old.cacheEnabled !== false,
+          cacheOnly: typeof input.cacheOnly === 'boolean' ? input.cacheOnly : old.cacheOnly === true,
+          autoCleanHours: Math.max(0, Math.min(168, Number(input.autoCleanHours !== undefined ? input.autoCleanHours : (old.autoCleanHours === undefined ? 24 : old.autoCleanHours)))),
+          lastCacheCleanAt: Number(old.lastCacheCleanAt || Date.now()),
           maxObjectBytes: Math.max(1024, Math.min(20000000, Number(input.maxObjectBytes || old.maxObjectBytes || 2000000))),
           filterMode: input.filterMode === 'allow' ? 'allow' : 'block'
         };
@@ -178,16 +199,7 @@ function handleApi(req, res, pathname) {
   if (pathname === '/api/cache' && req.method === 'GET') return jsonResponse(res, 200, getCacheSummary());
   if ((pathname === '/api/cache/purge' || pathname === '/api/cache/clean') && req.method === 'POST') {
     const expiredOnly = pathname.endsWith('/clean');
-    let removed = 0;
-    for (const name of fs.readdirSync(CACHE_DIR)) {
-      if (!name.endsWith('.json')) continue;
-      const file = path.join(CACHE_DIR, name);
-      let isExpired = false;
-      try { isExpired = Number(JSON.parse(fs.readFileSync(file, 'utf8')).expiresAt || 0) <= Date.now(); } catch { isExpired = true; }
-      if (!expiredOnly || isExpired) {
-        try { fs.unlinkSync(file); removed++; } catch {}
-      }
-    }
+    const removed = expiredOnly ? cleanExpiredCache() : purgeAllCache();
     log(expiredOnly ? 'cache-clean-expired' : 'cache-purge', { removed });
     return jsonResponse(res, 200, { ok: true, removed, cache: getCacheSummary() });
   }
@@ -216,6 +228,18 @@ const dashboard = http.createServer((req, res) => {
   res.writeHead(404); res.end('Not found');
 });
 dashboard.listen(DASHBOARD_PORT, '127.0.0.1', () => console.log('CEOAI Juwet dashboard http://127.0.0.1:' + DASHBOARD_PORT));
+const cleanerTimer = setInterval(() => {
+  const config = readJson(files.config, {});
+  const hours = Math.max(0, Number(config.autoCleanHours || 0));
+  const last = Number(config.lastCacheCleanAt || Date.now());
+  if (hours > 0 && Date.now() - last >= hours * 3600000) {
+    const removed = cleanExpiredCache();
+    config.lastCacheCleanAt = Date.now();
+    writeJson(files.config, config);
+    log('cache-auto-clean', { removed, periodHours: hours });
+  }
+}, 60000);
+cleanerTimer.unref();
 
 function applyRewrites(urlText) {
   let result = urlText;
@@ -274,6 +298,14 @@ function proxyRequest(req, res) {
     } catch {}
     stats.misses++;
   } else stats.bypass++;
+
+  if (config.cacheOnly === true) {
+    stats.offlineMisses++;
+    log('OFFLINE-MISS', { host, url: target.origin + target.pathname });
+    res.writeHead(504, { 'content-type': 'text/plain; charset=utf-8', 'x-ceoai-cache': 'OFFLINE-MISS' });
+    res.end('Offline cache-only mode: this URL is not available in cache.');
+    return;
+  }
 
   const transport = target.protocol === 'https:' ? https : http;
   const headers = { ...req.headers, host: target.host };
@@ -338,6 +370,11 @@ proxy.on('connect', (req, client, head) => {
   const host = normalizeHost(split >= 0 ? req.url.slice(0, split) : req.url);
   const port = split >= 0 ? Number(req.url.slice(split + 1)) : 443;
   const decision = filterDecision(host);
+  if (readJson(files.config, {}).cacheOnly === true) {
+    stats.offlineMisses++;
+    log('OFFLINE-CONNECT-MISS', { host, port });
+    client.end('HTTP/1.1 504 Gateway Timeout\r\nConnection: close\r\n\r\n'); return;
+  }
   if (decision.blocked) {
     stats.blocked++; log('blocked-connect', { host, reason: decision.reason });
     client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
