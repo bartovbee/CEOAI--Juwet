@@ -156,6 +156,21 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(blocked.status, 403);
     await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/blocked/127.0.0.1', method: 'DELETE' });
 
+    const offlineSettings = await httpRequest({
+      host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
+      headers: { 'content-type': 'application/json' }
+    }, JSON.stringify({ cacheOnly: true, autoCleanHours: 0 }));
+    assert.strictEqual(offlineSettings.status, 200);
+    const offlineMiss = await proxyGet(proxyPort, originPort, 'offline-miss');
+    assert.strictEqual(offlineMiss.status, 504);
+    assert.strictEqual(offlineMiss.headers['x-ceoai-cache'], 'OFFLINE-MISS');
+    assert.strictEqual(originCount, 1, 'offline mode must not contact upstream');
+
+    await httpRequest({
+      host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
+      headers: { 'content-type': 'application/json' }
+    }, JSON.stringify({ cacheOnly: false }));
+
     const mode = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
       headers: { 'content-type': 'application/json' }
@@ -183,7 +198,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const logs = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/logs' });
     assert.strictEqual(logs.status, 200);
     assert(logs.body.includes('HIT'));
-    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, rewrite, block/allow filters, cache cleaner, HTTPS CONNECT tunnel, and logs.');
+    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, rewrite, block/allow filters, offline-only mode, cache cleaner, HTTPS CONNECT tunnel, and logs.');
   } finally {
     child.kill();
     await Promise.race([new Promise(resolve => child.once('exit', resolve)), delay(2000)]);
