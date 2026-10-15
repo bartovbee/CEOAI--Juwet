@@ -311,7 +311,7 @@ function proxyRequest(req, res) {
   const safeMethod = req.method === 'GET';
   const hasCredentials = Boolean(req.headers.authorization || req.headers.cookie);
   const requestCacheControl = String(req.headers['cache-control'] || '').toLowerCase();
-  const requestForcesRefresh = /(?:^|,)\\s*(?:no-cache|no-store|max-age\\s*=\\s*0)(?:\\s*(?:,|$))/.test(requestCacheControl) ||
+  const requestForcesRefresh = /(?:^|,)[ \t]*(?:no-cache|no-store|max-age[ \t]*=[ \t]*0)(?:[ \t]*(?:,|$))/.test(requestCacheControl) ||
     String(req.headers.pragma || '').toLowerCase().includes('no-cache');
   const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && config.cacheEnabled !== false && target.protocol === 'http:';
   const key = cacheKey(target.href), cacheFile = path.join(CACHE_DIR, key + '.json');
@@ -362,7 +362,7 @@ function proxyRequest(req, res) {
       log(canCache ? 'MISS' : 'BYPASS', { host, url: target.origin + target.pathname, statusCode: upstreamRes.statusCode, bytes: size });
       const cacheControl = String(upstreamRes.headers['cache-control'] || '');
       const directives = cacheControl.toLowerCase().split(',').map(value => value.trim());
-      const match = cacheControl.match(/(?:^|,)\\s*max-age\\s*=\\s*(\\d+)/i);
+      const match = cacheControl.match(/(?:^|,)[ \t]*max-age[ \t]*=[ \t]*([0-9]+)/i);
       const expiresAtHeader = Date.parse(upstreamRes.headers.expires || '');
       const expiresTtl = Number.isFinite(expiresAtHeader) ? Math.floor((expiresAtHeader - Date.now()) / 1000) : 0;
       const requestedTtl = match ? Number(match[1]) : expiresTtl;
