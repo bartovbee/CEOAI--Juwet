@@ -310,7 +310,10 @@ function proxyRequest(req, res) {
   const config = readJson(files.config, { cacheEnabled: true, maxObjectBytes: 2000000 });
   const safeMethod = req.method === 'GET';
   const hasCredentials = Boolean(req.headers.authorization || req.headers.cookie);
-  const canCache = safeMethod && !hasCredentials && config.cacheEnabled !== false && target.protocol === 'http:';
+  const requestCacheControl = String(req.headers['cache-control'] || '').toLowerCase();
+  const requestForcesRefresh = /(?:^|,)\\s*(?:no-cache|no-store|max-age\\s*=\\s*0)(?:\\s*(?:,|$))/.test(requestCacheControl) ||
+    String(req.headers.pragma || '').toLowerCase().includes('no-cache');
+  const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && config.cacheEnabled !== false && target.protocol === 'http:';
   const key = cacheKey(target.href), cacheFile = path.join(CACHE_DIR, key + '.json');
   if (canCache) {
     try {
@@ -357,10 +360,19 @@ function proxyRequest(req, res) {
     });
     upstreamRes.on('end', () => {
       log(canCache ? 'MISS' : 'BYPASS', { host, url: target.origin + target.pathname, statusCode: upstreamRes.statusCode, bytes: size });
-      const cacheControl = upstreamRes.headers['cache-control'] || '';
-      const match = cacheControl.match(/(?:^|,)\s*max-age=(\d+)/i);
-      const requestedTtl = match ? Number(match[1]) : 120;
-      const mayStore = !/no-cache/i.test(cacheControl) && requestedTtl > 0;
+      const cacheControl = String(upstreamRes.headers['cache-control'] || '');
+      const directives = cacheControl.toLowerCase().split(',').map(value => value.trim());
+      const match = cacheControl.match(/(?:^|,)\\s*max-age\\s*=\\s*(\\d+)/i);
+      const expiresAtHeader = Date.parse(upstreamRes.headers.expires || '');
+      const expiresTtl = Number.isFinite(expiresAtHeader) ? Math.floor((expiresAtHeader - Date.now()) / 1000) : 0;
+      const requestedTtl = match ? Number(match[1]) : expiresTtl;
+      const explicitlyFresh = requestedTtl > 0 && (Boolean(match) || expiresTtl > 0 || directives.includes('public'));
+      const mayStore = explicitlyFresh &&
+        !directives.includes('private') &&
+        !directives.includes('no-store') &&
+        !directives.includes('no-cache') &&
+        !directives.includes('must-revalidate') &&
+        requestedTtl > 0;
       const ttl = Math.min(3600, Math.max(1, requestedTtl));
       if (cacheHeadersAllowed && !tooLarge && size <= maxBytes && mayStore) {
         const body = Buffer.concat(chunks);
