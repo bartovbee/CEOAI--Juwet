@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node tests/smoke.js && node tests/integration.js",
-    "build:windows": "pkg server.js --targets node18-win-x64 --output dist/CEOAI-Juwet.exe"
+    "build:windows": "pkg server.js --config package.json --targets node18-win-x64 --output dist/CEOAI-Juwet.exe"
   },
   "dependencies": {},
   "devDependencies": {
@@ -14,6 +14,7 @@
   },
   "pkg": {
     "assets": [
+      "public/*",
       "public/**/*"
     ],
     "scripts": [
