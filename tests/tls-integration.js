@@ -112,7 +112,7 @@ function interceptedGet(proxyPort, originPort, caPem) {
     assert.strictEqual(JSON.parse(initial.body).enabled, false, 'TLS inspection must be disabled by default');
     const ca = await request(dashboardPort, '/api/tls/ca.pem');
     assert.strictEqual(ca.status, 200);
-    const config = await request(dashboardPort, '/api/config', 'POST', JSON.stringify({ tlsInspectionEnabled: true }));
+    const config = await request(dashboardPort, '/api/config', 'POST', JSON.stringify({ tlsInspectionEnabled: true, tlsInspectionPorts: [originPort] }));
     assert.strictEqual(config.status, 200);
     const first = await interceptedGet(proxyPort, originPort, ca.body);
     assert.strictEqual(first.status, 200, first.header);
