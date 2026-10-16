@@ -23,7 +23,10 @@ class LocalCertificateAuthority {
         const pairMatches = privateKey.n && privateKey.e && publicKey.n && publicKey.e &&
           privateKey.n.compareTo(publicKey.n) === 0 && privateKey.e.compareTo(publicKey.e) === 0;
         const isCA = certificate.extensions.some(extension => extension.name === 'basicConstraints' && extension.cA === true);
-        if (pairMatches && isCA && certificate.validity.notAfter > new Date()) return;
+        const isSelfSigned = certificate.verify(certificate);
+        const now = new Date();
+        const isCurrentlyValid = certificate.validity.notBefore <= now && certificate.validity.notAfter > now;
+        if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) return;
       } catch {}
       // Invalid, expired, or mismatched CA files cannot be trusted; rotate and clear leaves.
     }
