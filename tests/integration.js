@@ -304,10 +304,13 @@ function testConnectTunnel(proxyPort, echoPort) {
     }, JSON.stringify({ filterMode: 'block' }));
 
     const expiredPath = path.join(dataDir, 'cache', 'expired-test.json');
-    fs.writeFileSync(expiredPath, JSON.stringify({ expiresAt: 1, body: '' }));
+    const malformedExpiryPath = path.join(dataDir, 'cache', 'malformed-expiry-test.json');
+    fs.writeFileSync(expiredPath, JSON.stringify({ expiresAt: 1, body: '', statusCode: 200 }));
+    fs.writeFileSync(malformedExpiryPath, JSON.stringify({ expiresAt: 'not-a-date', body: '', statusCode: 200 }));
     const clean = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/cache/clean', method: 'POST' });
     assert.strictEqual(clean.status, 200);
     assert.strictEqual(fs.existsSync(expiredPath), false);
+    assert.strictEqual(fs.existsSync(malformedExpiryPath), false, 'malformed cache metadata must be cleaned');
 
     await testConnectTunnel(proxyPort, echoPort);
     // Repeat cache and tunnel behavior to catch intermittent state and socket regressions.
