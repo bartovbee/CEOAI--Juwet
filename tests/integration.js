@@ -134,8 +134,10 @@ function testConnectTunnel(proxyPort, echoPort) {
   const proxyPort = await freePort();
   const dashboardPort = await freePort();
   let originCount = 0;
+  let receivedConnectionNominatedHeader = false;
   const origin = http.createServer((req, res) => {
     originCount++;
+    if (req.url === '/hop-by-hop') receivedConnectionNominatedHeader = Object.prototype.hasOwnProperty.call(req.headers, 'x-client-hop');
     const policies = {
       private: 'private, max-age=60',
       'no-store': 'no-store, max-age=60',
@@ -147,6 +149,10 @@ function testConnectTunnel(proxyPort, echoPort) {
     };
     const policy = policies[req.url.slice(1)];
     const headers = { 'content-type': 'text/plain' };
+    if (req.url === '/hop-by-hop') {
+      headers.connection = 'x-origin-hop';
+      headers['x-origin-hop'] = 'must-not-cross-proxy';
+    }
     if (policy !== undefined) {
       if (policy) headers['cache-control'] = policy;
     } else {
@@ -198,6 +204,15 @@ function testConnectTunnel(proxyPort, echoPort) {
     }, JSON.stringify({ note: 'x'.repeat(11000) }));
     assert.strictEqual(oversizedConfig.status, 413, 'oversized dashboard request should return HTTP 413 without resetting the connection');
 
+
+    const hopByHop = await httpRequest({
+      host: '127.0.0.1', port: proxyPort, method: 'GET',
+      path: 'http://127.0.0.1:' + originPort + '/hop-by-hop',
+      headers: { host: '127.0.0.1:' + originPort, connection: 'x-client-hop', 'x-client-hop': 'must-not-cross-proxy' }
+    });
+    assert.strictEqual(hopByHop.status, 200);
+    assert.strictEqual(receivedConnectionNominatedHeader, false, 'Connection-nominated request headers must not reach upstream');
+    assert.strictEqual(hopByHop.headers['x-origin-hop'], undefined, 'Connection-nominated response headers must not reach clients');
 
     const first = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(first.status, 200);
