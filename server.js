@@ -254,8 +254,18 @@ function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/config' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; if (body.length > 10000) req.destroy(); });
+    let tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      body += chunk;
+      if (Buffer.byteLength(body) > 10000) {
+        tooLarge = true;
+        jsonResponse(res, 413, { ok: false, error: 'Body konfigurasi terlalu besar (maksimum 10 KB)' });
+        req.resume();
+      }
+    });
     req.on('end', () => {
+      if (tooLarge) return;
       try {
         const input = JSON.parse(body);
         const old = readJson(files.config, {});
@@ -293,8 +303,18 @@ function handleApi(req, res, pathname) {
     const dest = pathname === '/api/blocked' ? files.blocked : files.allowed;
     const kind = pathname === '/api/blocked' ? 'blocked' : 'allowed';
     let body = '';
-    req.on('data', chunk => { body += chunk; if (body.length > 10000) req.destroy(); });
+    let tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      body += chunk;
+      if (Buffer.byteLength(body) > 10000) {
+        tooLarge = true;
+        jsonResponse(res, 413, { ok: false, error: 'Body filter terlalu besar (maksimum 10 KB)' });
+        req.resume();
+      }
+    });
     req.on('end', () => {
+      if (tooLarge) return;
       try {
         const host = normalizeHost(JSON.parse(body).host);
         if (!host || host.length > 253 || /[^a-z0-9.:[\]-]/i.test(host)) return jsonResponse(res, 400, { ok: false, error: 'Domain tidak valid' });
@@ -326,8 +346,18 @@ function handleApi(req, res, pathname) {
   if (pathname === '/api/rewrite' && req.method === 'GET') return jsonResponse(res, 200, readArray(files.rewrites));
   if (pathname === '/api/rewrite' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; if (body.length > 20000) req.destroy(); });
+    let tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      body += chunk;
+      if (Buffer.byteLength(body) > 20000) {
+        tooLarge = true;
+        jsonResponse(res, 413, { ok: false, error: 'Body rewrite terlalu besar (maksimum 20 KB)' });
+        req.resume();
+      }
+    });
     req.on('end', () => {
+      if (tooLarge) return;
       try {
         const input = JSON.parse(body);
         const from = String(input.from || '');
