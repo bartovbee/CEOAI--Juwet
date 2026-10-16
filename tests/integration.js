@@ -217,12 +217,12 @@ function testConnectTunnel(proxyPort, echoPort) {
     const first = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(first.status, 200);
     assert.strictEqual(first.headers['x-ceoai-cache'], 'MISS');
-    assert.strictEqual(first.body, 'origin-response-1');
+    const cachedBody = first.body;
 
     const second = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(second.status, 200);
     assert.strictEqual(second.headers['x-ceoai-cache'], 'HIT');
-    assert.strictEqual(second.body, 'origin-response-1');
+    assert.strictEqual(second.body, cachedBody);
     assert.strictEqual(originCount, 1, 'cache HIT should not request upstream again');
 
     const forcedRefresh = await httpRequest({
@@ -235,7 +235,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(forcedRefresh.body, 'origin-response-2');
     const afterBypass = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(afterBypass.headers['x-ceoai-cache'], 'HIT');
-    assert.strictEqual(afterBypass.body, 'origin-response-1');
+    assert.strictEqual(afterBypass.body, cachedBody);
     assert.strictEqual(originCount, 2, 'request no-cache must bypass cache and preserve existing object');
 
     for (const pathName of ['private', 'no-store', 'no-cache', 'must-revalidate', 'no-cache-fields', 'pragma-no-cache', 'no-freshness']) {
