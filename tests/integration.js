@@ -203,6 +203,12 @@ function testConnectTunnel(proxyPort, echoPort) {
       assert.strictEqual(originCount, before + 2, pathName + ' should reach origin for both requests');
     }
 
+    const malformedDelete = await httpRequest({
+      host: '127.0.0.1', port: dashboardPort,
+      path: '/api/blocked/%E0%A4%A', method: 'DELETE'
+    });
+    assert.strictEqual(malformedDelete.status, 400, 'malformed URL encoding should return 400 without crashing the server');
+
     const clientList = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/clients' });
     assert.strictEqual(clientList.status, 200);
     const clientData = JSON.parse(clientList.body);
