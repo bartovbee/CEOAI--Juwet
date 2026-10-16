@@ -100,6 +100,15 @@ try {
     } finally { fs.closeSync(fd); }
   }
 } catch {}
+// Provision the local Root CA once at application startup, even before TLS inspection is enabled.
+// The private key stays in the data directory and is never exposed by the dashboard API.
+try {
+  localCA.ensureCA();
+  log('tls-ca-ready', { certificatePath: localCA.certPath });
+} catch (error) {
+  log('tls-ca-startup-error', { error: error.message });
+  console.error('CEOAI Juwet could not initialize the local Root CA: ' + error.message);
+}
 function normalizeHost(value) {
   return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
 }
