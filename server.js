@@ -300,7 +300,7 @@ function handleApi(req, res, pathname) {
         if (!from || from.length > 500 || to.length > 2000 || from.includes('\n') || to.includes('\n')) {
           return jsonResponse(res, 400, { ok: false, error: 'Aturan rewrite tidak valid' });
         }
-        const list = readJson(files.rewrites, []);
+        const list = readArray(files.rewrites);
         const rule = { id: crypto.randomBytes(6).toString('hex'), from, to, enabled: true };
         list.push(rule); writeJson(files.rewrites, list);
         log('rewrite-add', { id: rule.id, from });
@@ -311,7 +311,7 @@ function handleApi(req, res, pathname) {
   }
   if (pathname.startsWith('/api/rewrite/') && req.method === 'DELETE') {
     const id = pathname.slice('/api/rewrite/'.length);
-    const list = readJson(files.rewrites, []).filter(rule => rule.id !== id);
+    const list = readArray(files.rewrites).filter(rule => rule.id !== id);
     writeJson(files.rewrites, list); log('rewrite-remove', { id });
     return jsonResponse(res, 200, { ok: true, rules: list });
   }
@@ -354,7 +354,7 @@ cleanerTimer.unref();
 
 function applyRewrites(urlText) {
   let result = urlText;
-  for (const rule of readJson(files.rewrites, [])) {
+  for (const rule of readArray(files.rewrites)) {
     if (rule.enabled !== false && rule.from) result = result.split(rule.from).join(rule.to);
   }
   return result;
