@@ -38,7 +38,8 @@
       "server.js",
       "public/**/*",
       "package.json",
-      "build/**/*"
+      "build/**/*",
+      "tls-inspection.js"
     ],
     "asar": true,
     "win": {
