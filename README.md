@@ -39,3 +39,12 @@ Atur browser/perangkat klien agar menggunakan IP komputer server dan port proxy 
 GitHub Actions menguji source, membangun `CEOAI-Juwet.exe`, menguji EXE hasil paket, lalu mengunggah artefak bersama ZIP source jika seluruh langkah lulus. Simpan folder `data` di samping EXE agar cache/log/filter/config bertahan saat aplikasi ditutup atau diperbarui.
 
 Ini adalah implementasi baru yang terinspirasi konsep proxy/cache klasik, bukan salinan aplikasi atau kode HandyCache.
+
+
+## Inspeksi TLS dan cache HTTPS (opt-in)
+
+Inspeksi TLS tersedia sebagai fitur **opsional dan nonaktif secara default**. Aktifkan hanya untuk perangkat/jaringan yang Anda miliki atau berwenang kelola. Perangkat klien harus mempercayai sertifikat publik CA lokal melalui menu `/api/tls/ca.pem`; jangan membagikan private key CA. Private key disimpan di `data/tls/ca-key.pem` dan sertifikat CA di `data/tls/ca-cert.pem`.
+
+Status dapat diperiksa melalui `GET /api/tls/status`. Pengaturan `tlsInspectionEnabled: true` dapat dikirim melalui `POST /api/config` setelah dashboard lokal aktif. Untuk menonaktifkan kembali kirim `tlsInspectionEnabled: false`. Saat inspeksi aktif, hanya koneksi CONNECT ke port 443 yang dialihkan ke jalur inspeksi. Sertifikat upstream tetap diverifikasi oleh klien Node.js ketika membuat koneksi HTTPS; jangan gunakan proxy untuk melewati peringatan sertifikat situs. Kebijakan cache HTTP yang sama tetap berlaku: permintaan ber-cookie/Authorization tidak di-cache, dan respons yang privat atau melarang penyimpanan harus bypass.
+
+**Peringatan:** inspeksi TLS dapat membuat isi HTTPS—termasuk informasi sensitif—terlihat oleh proses lokal. Gunakan persetujuan eksplisit, akses perangkat yang terbatas, dan firewall. Fitur ini belum dianggap tervalidasi untuk produksi sampai pengujian integrasi TLS/HTTPS pada workflow Windows lulus.
