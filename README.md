@@ -14,7 +14,7 @@ CEOAI Juwet adalah aplikasi desktop Windows satu jendela (tanpa browser/dashboar
 
 ## HTTPS dan keamanan
 
-HTTPS bekerja sebagai **CONNECT tunnel**. Versi ini tidak mendekripsi atau menyimpan payload HTTPS; browser tetap memvalidasi TLS situs tujuan. Cache hanya digunakan untuk request HTTP GET yang tidak memakai cookie/authorization dan tidak dilarang oleh header cache server. TLS upstream tidak dimatikan.
+Secara default, HTTPS bekerja sebagai **CONNECT tunnel** tanpa dekripsi; browser tetap memvalidasi TLS situs tujuan. Fitur inspeksi TLS dapat diaktifkan secara eksplisit untuk lingkungan yang berwenang, sebagaimana dijelaskan pada bagian di bawah. Cache HTTP hanya digunakan untuk request GET yang tidak memakai cookie/authorization dan tidak dilarang oleh kebijakan cache server. Verifikasi sertifikat TLS upstream tetap aktif.
 
 Proxy mendengarkan pada semua interface jaringan agar perangkat LAN dapat menggunakannya. Gunakan hanya pada jaringan tepercaya; versi awal belum menyediakan autentikasi proxy. Dashboard dibatasi ke localhost.
 
@@ -47,4 +47,4 @@ Inspeksi TLS tersedia sebagai fitur **opsional dan nonaktif secara default**. Ak
 
 Status dapat diperiksa melalui `GET /api/tls/status`. Pengaturan `tlsInspectionEnabled: true` dapat dikirim melalui `POST /api/config` setelah dashboard lokal aktif. Untuk menonaktifkan kembali kirim `tlsInspectionEnabled: false`. Saat inspeksi aktif, hanya koneksi CONNECT ke port 443 yang dialihkan ke jalur inspeksi. Sertifikat upstream tetap diverifikasi oleh klien Node.js ketika membuat koneksi HTTPS; jangan gunakan proxy untuk melewati peringatan sertifikat situs. Kebijakan cache HTTP yang sama tetap berlaku: permintaan ber-cookie/Authorization tidak di-cache, dan respons yang privat atau melarang penyimpanan harus bypass.
 
-**Peringatan:** inspeksi TLS dapat membuat isi HTTPS—termasuk informasi sensitif—terlihat oleh proses lokal. Gunakan persetujuan eksplisit, akses perangkat yang terbatas, dan firewall. Fitur ini belum dianggap tervalidasi untuk produksi sampai pengujian integrasi TLS/HTTPS pada workflow Windows lulus.
+**Peringatan:** inspeksi TLS dapat membuat isi HTTPS—termasuk informasi sensitif—terlihat oleh proses lokal. Gunakan persetujuan eksplisit, akses perangkat yang terbatas, dan firewall. Pengujian integrasi TLS/HTTPS dan smoke test EXE pada workflow Windows telah lulus pada build yang diperiksa; ini bukan jaminan bebas bug atau sertifikasi keamanan untuk semua lingkungan produksi.
