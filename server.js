@@ -30,7 +30,7 @@ function readJson(file, fallback) {
 function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2));
 }
-if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, cacheOnly: false, maxObjectBytes: 2000000, filterMode: 'block', autoCleanHours: 24, lastCacheCleanAt: Date.now(), tlsInspectionEnabled: false });
+if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, cacheOnly: false, maxObjectBytes: 2000000, filterMode: 'block', autoCleanHours: 24, lastCacheCleanAt: Date.now(), tlsInspectionEnabled: false, tlsInspectionPorts: [443] });
 if (!fs.existsSync(files.blocked)) writeJson(files.blocked, []);
 if (!fs.existsSync(files.allowed)) writeJson(files.allowed, []);
 if (!fs.existsSync(files.rewrites)) writeJson(files.rewrites, []);
@@ -177,7 +177,8 @@ function handleApi(req, res, pathname) {
           lastCacheCleanAt: Number(old.lastCacheCleanAt || Date.now()),
           maxObjectBytes: Math.max(1024, Math.min(20000000, Number(input.maxObjectBytes || old.maxObjectBytes || 2000000))),
           filterMode: input.filterMode === 'allow' ? 'allow' : 'block',
-          tlsInspectionEnabled: typeof input.tlsInspectionEnabled === 'boolean' ? input.tlsInspectionEnabled : old.tlsInspectionEnabled === true
+          tlsInspectionEnabled: typeof input.tlsInspectionEnabled === 'boolean' ? input.tlsInspectionEnabled : old.tlsInspectionEnabled === true,
+          tlsInspectionPorts: Array.isArray(input.tlsInspectionPorts) ? [...new Set(input.tlsInspectionPorts.map(Number).filter(port => Number.isInteger(port) && port >= 1 && port <= 65535))].slice(0, 32) : (Array.isArray(old.tlsInspectionPorts) ? old.tlsInspectionPorts : [443])
         };
         writeJson(files.config, next);
         log('config-updated', { cacheEnabled: next.cacheEnabled, filterMode: next.filterMode });
@@ -455,7 +456,7 @@ proxy.on('connect', (req, client, head) => {
   }
 
   const config = readJson(files.config, {});
-  if (config.tlsInspectionEnabled === true) {
+  if (config.tlsInspectionEnabled === true && (Array.isArray(config.tlsInspectionPorts) ? config.tlsInspectionPorts : [443]).includes(port)) {
     // Explicit opt-in TLS interception. Only the local CA certificate is exported; its private key stays in the app data folder.
     let context;
     try { context = localCA.getContext(host); }
