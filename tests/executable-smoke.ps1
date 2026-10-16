@@ -44,9 +44,12 @@ try {
   Get-Process -Name 'CEOAI Juwet' -ErrorAction SilentlyContinue | Stop-Process -Force
   Start-Sleep -Milliseconds 750
 
-  # Exercise real cache paths inside the packaged Windows EXE, not only its listener.
-  Write-Host 'Starting packaged EXE HTTP and HTTPS cache regression tests...'
-  $env:CEOAI_TEST_EXECUTABLE = $exe
+  # Exercise the packaged Electron app directly for repeatable integration launches.
+  # The portable NSIS wrapper can outlive its launcher process and interfere with a second spawn.
+  $integrationExe = Join-Path (Get-Location) 'dist\win-unpacked\CEOAI Juwet.exe'
+  if (-not (Test-Path $integrationExe)) { throw "Packaged app executable not found: $integrationExe" }
+  Write-Host 'Starting packaged app HTTP and HTTPS cache regression tests...'
+  $env:CEOAI_TEST_EXECUTABLE = $integrationExe
   node tests/integration.js
   if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE HTTP cache integration failed' }
   node tests/tls-integration.js
