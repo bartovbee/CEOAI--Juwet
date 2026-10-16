@@ -62,27 +62,25 @@ function recordClient(req, kind = 'HTTP') {
   }
 }
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
+let logWriteQueue = Promise.resolve();
 function log(type, detail = {}) {
   const item = { time: new Date().toISOString(), type, ...detail };
   stats.recent.unshift(item);
   stats.recent = stats.recent.slice(0, 100);
   const line = JSON.stringify(item) + '\n';
-  fs.stat(files.log, (statError, stat) => {
-    if (!statError && stat.size + Buffer.byteLength(line) > MAX_LOG_BYTES) {
+  // Serialize rotation and append operations so concurrent requests cannot race log rotation.
+  logWriteQueue = logWriteQueue.then(async () => {
+    let size = 0;
+    try { size = (await fs.promises.stat(files.log)).size; } catch {}
+    if (size + Buffer.byteLength(line) > MAX_LOG_BYTES) {
       const previous = files.log + '.1';
-      fs.unlink(previous, () => {
-        fs.rename(files.log, previous, renameError => {
-          if (renameError && renameError.code !== 'ENOENT') {
-            fs.writeFile(files.log, line, { flag: 'a' }, () => {});
-            return;
-          }
-          fs.writeFile(files.log, line, { flag: 'a' }, () => {});
-        });
-      });
-      return;
+      try { await fs.promises.unlink(previous); } catch {}
+      try { await fs.promises.rename(files.log, previous); } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
     }
-    fs.appendFile(files.log, line, () => {});
-  });
+    await fs.promises.appendFile(files.log, line);
+  }).catch(() => {});
 }
 try {
   const stat = fs.statSync(files.log);
