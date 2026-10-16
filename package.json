@@ -5,7 +5,7 @@
   "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/smoke.js && node tests/integration.js",
+    "test": "node tests/smoke.js && node tests/integration.js && node tests/tls-integration.js",
     "build:windows": "electron-builder --win portable --x64",
     "prebuild:windows": "node scripts/make-icon.js"
   },
