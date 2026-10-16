@@ -365,6 +365,11 @@ function proxyRequest(req, res) {
   const transport = target.protocol === 'https:' ? https : http;
   const headers = { ...req.headers, host: target.host };
   for (const keyName of ['proxy-connection', 'proxy-authorization', 'connection']) delete headers[keyName];
+  // A rewrite that changes origin must never forward origin-bound credentials.
+  if (original.origin !== target.origin) {
+    delete headers.authorization;
+    delete headers.cookie;
+  }
   const upstream = transport.request(target, { method: req.method, headers, timeout: 20000 }, upstreamRes => {
     const responseHeaders = cleanHeaders(upstreamRes.headers);
     const maxBytes = Math.max(1024, Number(config.maxObjectBytes || 2000000));
