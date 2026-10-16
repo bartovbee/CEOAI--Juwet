@@ -103,6 +103,9 @@ try {
 function normalizeHost(value) {
   return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
 }
+function safeDecodeURIComponent(value) {
+  try { return decodeURIComponent(value); } catch { return null; }
+}
 function matchesHost(host, list) {
   const h = normalizeHost(host);
   return list.some(item => {
@@ -270,14 +273,18 @@ function handleApi(req, res, pathname) {
     return;
   }
   if (pathname.startsWith('/api/blocked/') && req.method === 'DELETE') {
-    const host = normalizeHost(decodeURIComponent(pathname.slice('/api/blocked/'.length)));
-    const list = readJson(files.blocked, []).filter(item => item !== host);
+    const decoded = safeDecodeURIComponent(pathname.slice('/api/blocked/'.length));
+    if (decoded === null) return jsonResponse(res, 400, { ok: false, error: 'Domain encoding tidak valid' });
+    const host = normalizeHost(decoded);
+    const list = readArray(files.blocked).filter(item => item !== host);
     writeJson(files.blocked, list); log('block-filter-remove', { host });
     return jsonResponse(res, 200, { ok: true, hosts: list });
   }
   if (pathname.startsWith('/api/allowed/') && req.method === 'DELETE') {
-    const host = normalizeHost(decodeURIComponent(pathname.slice('/api/allowed/'.length)));
-    const list = readJson(files.allowed, []).filter(item => item !== host);
+    const decoded = safeDecodeURIComponent(pathname.slice('/api/allowed/'.length));
+    if (decoded === null) return jsonResponse(res, 400, { ok: false, error: 'Domain encoding tidak valid' });
+    const host = normalizeHost(decoded);
+    const list = readArray(files.allowed).filter(item => item !== host);
     writeJson(files.allowed, list); log('allow-filter-remove', { host });
     return jsonResponse(res, 200, { ok: true, hosts: list });
   }
