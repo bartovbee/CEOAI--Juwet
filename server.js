@@ -181,7 +181,8 @@ function purgeAllCache() {
 }
 const MAX_CACHE_TOTAL_BYTES = 512 * 1024 * 1024;
 function storeCacheObject(targetFile, value) {
-  const serialized = JSON.stringify(value);
+  // writeJson pretty-prints JSON, so capacity accounting must use the exact on-disk representation.
+  const serialized = JSON.stringify(value, null, 2);
   const newBytes = Buffer.byteLength(serialized);
   if (newBytes > MAX_CACHE_TOTAL_BYTES) return false;
   const entries = [];
