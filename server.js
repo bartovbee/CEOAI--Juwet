@@ -472,7 +472,7 @@ proxy.on('connect', (req, client, head) => {
         catch (error) { callback(error); }
       }
     });
-    secure.ceoaiInterceptHost = host;
+    secure.ceoaiInterceptHost = (host.includes(':') ? '[' + host + ']' : host) + (port === 443 ? '' : ':' + port);
     secure.ceoaiTlsIntercepted = true;
     secure.on('error', error => log('tls-inspection-client-error', { host, error: error.message }));
     secure.on('secure', () => {
