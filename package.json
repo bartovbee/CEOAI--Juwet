@@ -1,7 +1,7 @@
 {
   "name": "ceoai-juwet",
   "version": "0.1.0",
-  "description": "CEOAI Juwet integrated HTTP proxy, cache and dashboard",
+  "description": "CEOAI Juwet integrated HTTP proxy, optional TLS inspection, HTTPS-aware cache and dashboard",
   "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js",
@@ -9,7 +9,9 @@
     "build:windows": "electron-builder --win portable --x64",
     "prebuild:windows": "node scripts/make-icon.js"
   },
-  "dependencies": {},
+  "dependencies": {
+    "node-forge": "^1.3.1"
+  },
   "devDependencies": {
     "electron": "^37.2.0",
     "electron-builder": "^26.0.12",
