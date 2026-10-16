@@ -168,6 +168,21 @@ function testConnectTunnel(proxyPort, echoPort) {
     const health = await waitForDashboard(dashboardPort, child);
     assert.strictEqual(health.ok, true);
     assert.strictEqual(health.proxyPort, proxyPort);
+
+    const conflictDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ceoai-port-conflict-'));
+    const conflictChild = spawn(process.execPath, [path.join(root, 'server.js')], {
+      cwd: root,
+      env: { ...process.env, PROXY_PORT: String(await freePort()), DASHBOARD_PORT: String(dashboardPort), CEOAI_DATA_DIR: conflictDataDir },
+      stdio: 'ignore'
+    });
+    const conflictExit = await Promise.race([
+      new Promise(resolve => conflictChild.once('exit', code => resolve(code))),
+      delay(5000).then(() => 'timeout')
+    ]);
+    if (conflictExit === 'timeout') conflictChild.kill();
+    assert.strictEqual(conflictExit, 1, 'port conflict must terminate cleanly instead of leaving a half-started server');
+    fs.rmSync(conflictDataDir, { recursive: true, force: true });
+
     const hostileHost = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/status',
       headers: { host: 'attacker.example:' + dashboardPort }
