@@ -85,7 +85,7 @@ function testConnectStatus(proxyPort, authority, expectedStatus) {
       const end = data.indexOf('\\r\\n');
       if (end >= 0) {
         const statusLine = data.slice(0, end);
-        const match = statusLine.match(/^HTTP\\/1\\.1 (\\d{3})/);
+        const match = statusLine.match(/^HTTP\/1\.1 (\d{3})/);
         if (!match) return finish(new Error('Invalid CONNECT response: ' + statusLine));
         if (Number(match[1]) !== expectedStatus) return finish(new Error('Expected CONNECT ' + expectedStatus + ' but got ' + statusLine));
         finish();
