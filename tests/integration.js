@@ -1,4 +1,5 @@
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
@@ -175,6 +176,25 @@ function testConnectTunnel(proxyPort, echoPort) {
     const index = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/' });
     assert.strictEqual(index.status, 200);
     assert(index.body.includes('CEOAI Juwet'));
+
+    const oversizedConfig = await httpRequest({
+      host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
+      headers: { 'content-type': 'application/json' }
+    }, JSON.stringify({ note: 'x'.repeat(11000) }));
+    assert.strictEqual(oversizedConfig.status, 413, 'oversized dashboard request should return HTTP 413 without resetting the connection');
+
+    const corruptUrl = 'http://127.0.0.1:' + originPort + '/corrupt-cache';
+    const corruptKey = crypto.createHash('sha256').update(corruptUrl).digest('hex');
+    fs.writeFileSync(path.join(dataDir, 'cache', corruptKey + '.json'), JSON.stringify({
+      statusCode: 200, expiresAt: Date.now() + 60000, body: Buffer.from('poisoned').toString('base64'),
+      headers: { 'x-corrupt': 'bad\\nheader' }
+    }));
+    const corruptMiss = await proxyGet(proxyPort, originPort, 'corrupt-cache');
+    assert.strictEqual(corruptMiss.status, 200);
+    assert.strictEqual(corruptMiss.headers['x-ceoai-cache'], 'MISS', 'corrupt cache headers must never be served');
+    const corruptHit = await proxyGet(proxyPort, originPort, 'corrupt-cache');
+    assert.strictEqual(corruptHit.headers['x-ceoai-cache'], 'HIT', 'valid upstream response should replace corrupt cache metadata');
+    assert.strictEqual(corruptHit.body, corruptMiss.body);
 
     const first = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(first.status, 200);
