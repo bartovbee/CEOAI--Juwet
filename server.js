@@ -163,7 +163,11 @@ function cleanExpiredCache() {
     if (!name.endsWith('.json')) continue;
     const file = path.join(CACHE_DIR, name);
     let expired = false;
-    try { expired = Number(JSON.parse(fs.readFileSync(file, 'utf8')).expiresAt || 0) <= Date.now(); } catch { expired = true; }
+    try {
+      const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const expiresAt = Number(obj && obj.expiresAt);
+      expired = !Number.isFinite(expiresAt) || expiresAt <= Date.now() || typeof obj.body !== 'string' || !Number.isInteger(obj.statusCode);
+    } catch { expired = true; }
     if (expired) try { fs.unlinkSync(file); removed++; } catch {}
   }
   return removed;
