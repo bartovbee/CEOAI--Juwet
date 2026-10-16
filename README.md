@@ -5,7 +5,7 @@ CEOAI Juwet adalah aplikasi desktop Windows satu jendela (tanpa browser/dashboar
 ## Fitur yang dibangun ulang dari konsep referensi
 
 - **Monitor:** statistik request, cache HIT/MISS, bypass, blokir, volume data, serta log aktivitas terkini.
-- **Cache Manager:** cache HTTP persisten di folder `data/cache`, pembersihan cache kedaluwarsa secara manual/terjadwal, dan tombol purge.
+- **Cache Manager:** cache HTTP persisten di folder `data/cache` (batas total bawaan 512 MB, objek tertua dihapus saat kapasitas penuh), pembersihan cache kedaluwarsa secara manual/terjadwal, dan tombol purge.
 - **Web Filters:** blocklist dan allowlist domain.
 - **Rewrite Rules:** penggantian teks URL sebelum request HTTP diteruskan.
 - **Offline / read-from-cache:** jika diaktifkan, request yang tidak ada dalam cache menerima respons 504 tanpa membuat koneksi upstream.
@@ -16,7 +16,7 @@ CEOAI Juwet adalah aplikasi desktop Windows satu jendela (tanpa browser/dashboar
 
 Secara default, HTTPS bekerja sebagai **CONNECT tunnel** tanpa dekripsi; browser tetap memvalidasi TLS situs tujuan. Fitur inspeksi TLS dapat diaktifkan secara eksplisit untuk lingkungan yang berwenang, sebagaimana dijelaskan pada bagian di bawah. Cache HTTP hanya digunakan untuk request GET yang tidak memakai cookie/authorization dan tidak dilarang oleh kebijakan cache server. Verifikasi sertifikat TLS upstream tetap aktif.
 
-Proxy mendengarkan pada semua interface jaringan agar perangkat LAN dapat menggunakannya. Gunakan hanya pada jaringan tepercaya; versi awal belum menyediakan autentikasi proxy. Dashboard dibatasi ke localhost.
+Proxy mendengarkan pada semua interface jaringan agar perangkat LAN dapat menggunakannya. Gunakan hanya pada jaringan tepercaya; proxy belum menyediakan autentikasi, jadi siapa pun yang dapat menjangkau port proxy bisa menggunakannya. Permintaan dari klien LAN ke alamat loopback proxy (misalnya `127.0.0.1` atau `localhost`) diblokir untuk mengurangi akses ke layanan lokal seperti dashboard. Dashboard dibatasi ke localhost. Log dibatasi dan diputar agar tidak tumbuh tanpa batas.
 
 ## Aplikasi Windows
 
