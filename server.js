@@ -110,6 +110,23 @@ function matchesHost(host, list) {
     return pattern && (h === pattern || h.endsWith('.' + pattern));
   });
 }
+function isLoopbackAddress(value) {
+  const ip = String(value || '').toLowerCase().replace(/^::ffff:/, '');
+  return ip === '::1' || ip === 'localhost' || /^127(?:\.\d{1,3}){3}$/.test(ip);
+}
+function isLoopbackTarget(value) {
+  const host = normalizeHost(value);
+  return host === 'localhost' || host.endsWith('.localhost') || host === '::1' ||
+    host === '::' || host === '0.0.0.0' || host.startsWith('::ffff:127.') ||
+    /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+function rejectRemoteLoopback(req, res, host) {
+  if (isLoopbackAddress(req.socket && req.socket.remoteAddress) || !isLoopbackTarget(host)) return false;
+  res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'x-ceoai-filter': 'local-target-blocked' });
+  res.end('Access to loopback services through a remote proxy client is blocked.');
+  log('blocked-local-target', { host, client: req.socket && req.socket.remoteAddress });
+  return true;
+}
 function filterDecision(host) {
   const config = readJson(files.config, { filterMode: 'block' });
   const blocked = readArray(files.blocked);
@@ -360,6 +377,7 @@ function proxyRequest(req, res) {
   if (!['http:', 'https:'].includes(target.protocol)) { res.writeHead(400); res.end('Rewrite protocol is not supported'); return; }
   target.username = ''; target.password = '';
   const host = normalizeHost(target.hostname);
+  if (rejectRemoteLoopback(req, res, host)) return;
   const decision = filterDecision(host);
   if (decision.blocked) {
     stats.blocked++; log('blocked', { host, reason: decision.reason, url: target.origin + target.pathname });
@@ -493,6 +511,10 @@ proxy.on('connect', (req, client, head) => {
     return;
   }
 
+  if (rejectRemoteLoopback(req, {
+    writeHead: (status, headers) => { client.write('HTTP/1.1 ' + status + ' ' + (status === 403 ? 'Forbidden' : 'Error') + '\\r\\n' + Object.entries(headers || {}).map(([k, v]) => k + ': ' + v).join('\\r\\n') + '\\r\\n\\r\\n'); },
+    end: body => client.end(body || '')
+  }, host)) return;
   const decision = filterDecision(host);
   if (readJson(files.config, {}).cacheOnly === true) {
     stats.offlineMisses++;
