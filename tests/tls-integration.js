@@ -28,7 +28,7 @@ function certPair(host) {
   leaf.validity.notBefore = new Date(Date.now() - 60000);
   leaf.validity.notAfter = new Date(Date.now() + 86400000);
   leaf.setSubject([{ name: 'commonName', value: host }]); leaf.setIssuer(ca.subject.attributes);
-  leaf.setExtensions([{ name: 'basicConstraints', cA: false }, { name: 'keyUsage', digitalSignature: true, keyEncipherment: true }, { name: 'extKeyUsage', serverAuth: true }, { name: 'subjectAltName', altNames: [{ type: 7, value: host }] }]);
+  leaf.setExtensions([{ name: 'basicConstraints', cA: false }, { name: 'keyUsage', digitalSignature: true, keyEncipherment: true }, { name: 'extKeyUsage', serverAuth: true }, { name: 'subjectAltName', altNames: [{ type: 7, ip: host }] }]);
   leaf.sign(keys.privateKey, forge.md.sha256.create());
   return { ca: forge.pki.certificateToPem(ca), key: forge.pki.privateKeyToPem(leafKeys.privateKey), cert: forge.pki.certificateToPem(leaf) };
 }
