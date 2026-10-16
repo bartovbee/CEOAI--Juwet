@@ -36,6 +36,7 @@ try {
   } finally { $client.Dispose() }
 
   # Exercise real cache paths inside the packaged Windows EXE, not only its listener.
+  Write-Host 'Starting packaged EXE HTTP and HTTPS cache regression tests...'
   $env:CEOAI_TEST_EXECUTABLE = $exe
   node tests/integration.js
   if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE HTTP cache integration failed' }
