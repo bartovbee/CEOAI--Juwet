@@ -165,11 +165,11 @@ function testConnectTunnel(proxyPort, echoPort) {
   const originPort = await listen(origin);
   const echo = net.createServer(socket => socket.pipe(socket));
   const echoPort = await listen(echo);
-  const child = spawn(process.execPath, [path.join(root, 'server.js')], {
-    cwd: root,
-    env: { ...process.env, PROXY_PORT: String(proxyPort), DASHBOARD_PORT: String(dashboardPort), CEOAI_DATA_DIR: dataDir },
-    stdio: 'ignore'
-  });
+  const appEnv = { ...process.env, PROXY_PORT: String(proxyPort), DASHBOARD_PORT: String(dashboardPort), CEOAI_DATA_DIR: dataDir, CEOAI_OPEN_BROWSER: '0' };
+  const testExecutable = process.env.CEOAI_TEST_EXECUTABLE;
+  const child = testExecutable
+    ? spawn(path.resolve(testExecutable), [], { cwd: root, env: appEnv, stdio: 'ignore' })
+    : spawn(process.execPath, [path.join(root, 'server.js')], { cwd: root, env: appEnv, stdio: 'ignore' });
   try {
     const health = await waitForDashboard(dashboardPort, child);
     assert.strictEqual(health.ok, true);
