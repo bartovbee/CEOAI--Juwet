@@ -8,8 +8,8 @@ const forge = require('node-forge');
 class LocalCertificateAuthority {
   constructor(dataDir) {
     this.dir = path.join(dataDir, 'tls');
-    this.keyPath = path.join(this.dir, 'ca-key.pem');
-    this.certPath = path.join(this.dir, 'ca-cert.pem');
+    this.keyPath = path.join(this.dir, 'rootCA.key');
+    this.certPath = path.join(this.dir, 'rootCA.pem');
     this.leafDir = path.join(this.dir, 'hosts');
     this.contexts = new Map();
     fs.mkdirSync(this.leafDir, { recursive: true });
@@ -91,7 +91,7 @@ class LocalCertificateAuthority {
     return context;
   }
   getCertificateInfo() {
-    // Status polling must not create a CA/private key while TLS inspection is disabled.
+    // Report the persisted local CA without changing key material.
     if (!fs.existsSync(this.keyPath) || !fs.existsSync(this.certPath)) {
       return { available: false, error: 'CA belum dibuat; unduh sertifikat atau aktifkan inspeksi TLS untuk membuat CA lokal.' };
     }
