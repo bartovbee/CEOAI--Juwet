@@ -271,10 +271,23 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(fs.existsSync(expiredPath), false);
 
     await testConnectTunnel(proxyPort, echoPort);
+    // Repeat cache and tunnel behavior to catch intermittent state and socket regressions.
+    for (let round = 1; round <= 25; round++) {
+      const suffix = 'repeat-cache-' + round;
+      const miss = await proxyGet(proxyPort, originPort, suffix);
+      assert.strictEqual(miss.status, 200, 'repeat round ' + round + ' first request');
+      assert.strictEqual(miss.headers['x-ceoai-cache'], 'MISS', 'repeat round ' + round + ' should MISS first');
+      const hit = await proxyGet(proxyPort, originPort, suffix);
+      assert.strictEqual(hit.status, 200, 'repeat round ' + round + ' second request');
+      assert.strictEqual(hit.headers['x-ceoai-cache'], 'HIT', 'repeat round ' + round + ' should HIT second');
+      assert.strictEqual(hit.body, miss.body, 'repeat round ' + round + ' body should remain identical');
+    }
+    for (let round = 0; round < 10; round++) await testConnectTunnel(proxyPort, echoPort);
+
     const logs = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/logs' });
     assert.strictEqual(logs.status, 200);
     assert(logs.body.includes('HIT'));
-    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, request no-cache bypass, private/no-store/no-cache/must-revalidate/no-freshness policies, rewrite, block/allow filters, offline-only mode, cache cleaner, HTTPS CONNECT tunnel, CONNECT block/offline/malformed-authority handling, and logs.');
+    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, request no-cache bypass, private/no-store/no-cache/must-revalidate/no-freshness policies, rewrite, block/allow filters, offline-only mode, cache cleaner, HTTPS CONNECT tunnel, CONNECT block/offline/malformed-authority handling, 25 repeated cache MISS/HIT rounds, 10 repeated CONNECT tunnels, and logs.');
   } finally {
     child.kill();
     await Promise.race([new Promise(resolve => child.once('exit', resolve)), delay(2000)]);
