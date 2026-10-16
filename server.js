@@ -1,5 +1,7 @@
 const http = require('http');
 const https = require('https');
+const tls = require('tls');
+const { LocalCertificateAuthority } = require('./tls-inspection');
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +15,7 @@ const CACHE_DIR = path.join(DATA_DIR, 'cache');
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const DASHBOARD_PORT = Number(process.env.DASHBOARD_PORT || 8787);
 for (const dir of [DATA_DIR, CACHE_DIR]) fs.mkdirSync(dir, { recursive: true });
+const localCA = new LocalCertificateAuthority(DATA_DIR);
 
 const files = {
   config: path.join(DATA_DIR, 'config.json'),
@@ -27,7 +30,7 @@ function readJson(file, fallback) {
 function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2));
 }
-if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, cacheOnly: false, maxObjectBytes: 2000000, filterMode: 'block', autoCleanHours: 24, lastCacheCleanAt: Date.now() });
+if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, cacheOnly: false, maxObjectBytes: 2000000, filterMode: 'block', autoCleanHours: 24, lastCacheCleanAt: Date.now(), tlsInspectionEnabled: false });
 if (!fs.existsSync(files.blocked)) writeJson(files.blocked, []);
 if (!fs.existsSync(files.allowed)) writeJson(files.allowed, []);
 if (!fs.existsSync(files.rewrites)) writeJson(files.rewrites, []);
@@ -135,9 +138,22 @@ function handleApi(req, res, pathname) {
     return jsonResponse(res, 200, {
       ok: true, name: 'CEOAI Juwet', version: '0.2.0',
       proxyPort: PROXY_PORT, dashboardPort: DASHBOARD_PORT,
-      httpsMode: 'CONNECT tunnel (TLS payload not inspected)',
+      httpsMode: readJson(files.config, {}).tlsInspectionEnabled === true ? 'TLS inspection enabled (local CA required)' : 'CONNECT tunnel (TLS payload not inspected)',
       stats, cache, config: readJson(files.config, {})
     });
+  }
+  if (pathname === '/api/tls/status' && req.method === 'GET') {
+    const config = readJson(files.config, {});
+    let ca = { available: false };
+    try { ca = localCA.getCertificateInfo(); } catch (error) { ca = { available: false, error: error.message }; }
+    return jsonResponse(res, 200, { enabled: config.tlsInspectionEnabled === true, ca, warning: 'Gunakan hanya pada perangkat dan jaringan yang Anda berwenang kelola. CA lokal tidak boleh dipasang pada perangkat pihak lain tanpa izin.' });
+  }
+  if (pathname === '/api/tls/ca.pem' && req.method === 'GET') {
+    try {
+      const pem = localCA.getCertificatePem();
+      res.writeHead(200, { 'content-type': 'application/x-pem-file', 'content-disposition': 'attachment; filename="CEOAI-Juwet-Inspection-CA.pem"', 'cache-control': 'no-store' });
+      return res.end(pem);
+    } catch (error) { return jsonResponse(res, 500, { ok: false, error: 'CA tidak dapat dibuat: ' + error.message }); }
   }
   if (pathname === '/api/clients' && req.method === 'GET') {
     const clients = [...clientStats.values()].sort((a, b) => Date.parse(b.lastSeen) - Date.parse(a.lastSeen));
@@ -160,7 +176,8 @@ function handleApi(req, res, pathname) {
           autoCleanHours: Math.max(0, Math.min(168, Number(input.autoCleanHours !== undefined ? input.autoCleanHours : (old.autoCleanHours === undefined ? 24 : old.autoCleanHours)))),
           lastCacheCleanAt: Number(old.lastCacheCleanAt || Date.now()),
           maxObjectBytes: Math.max(1024, Math.min(20000000, Number(input.maxObjectBytes || old.maxObjectBytes || 2000000))),
-          filterMode: input.filterMode === 'allow' ? 'allow' : 'block'
+          filterMode: input.filterMode === 'allow' ? 'allow' : 'block',
+          tlsInspectionEnabled: typeof input.tlsInspectionEnabled === 'boolean' ? input.tlsInspectionEnabled : old.tlsInspectionEnabled === true
         };
         writeJson(files.config, next);
         log('config-updated', { cacheEnabled: next.cacheEnabled, filterMode: next.filterMode });
@@ -284,7 +301,7 @@ function proxyRequest(req, res) {
   recordClient(req, 'HTTP');
   let original;
   try {
-    original = new URL(req.url);
+    original = req.ceoaiInterceptHost ? new URL('https://' + req.ceoaiInterceptHost + (String(req.url || '').startsWith('/') ? req.url : '/' + req.url)) : new URL(req.url);
     if (!original.hostname || !['http:', 'https:'].includes(original.protocol)) throw new Error('unsupported url');
   } catch {
     res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
@@ -313,7 +330,8 @@ function proxyRequest(req, res) {
   const requestCacheControl = String(req.headers['cache-control'] || '').toLowerCase();
   const requestForcesRefresh = /(?:^|,)[ \t]*(?:no-cache|no-store|max-age[ \t]*=[ \t]*0)(?:[ \t]*(?:,|$))/.test(requestCacheControl) ||
     String(req.headers.pragma || '').toLowerCase().includes('no-cache');
-  const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && config.cacheEnabled !== false && target.protocol === 'http:';
+  const httpsAuthorizedForCache = target.protocol !== 'https:' || req.ceoaiTlsIntercepted === true;
+  const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && config.cacheEnabled !== false && httpsAuthorizedForCache;
   const key = cacheKey(target.href), cacheFile = path.join(CACHE_DIR, key + '.json');
   if (canCache) {
     try {
@@ -403,6 +421,7 @@ function proxyRequest(req, res) {
   req.pipe(upstream);
 }
 const proxy = http.createServer(proxyRequest);
+const interceptedHttp = http.createServer(proxyRequest);
 proxy.on('connect', (req, client, head) => {
   stats.requests++;
   recordClient(req, 'CONNECT');
@@ -433,6 +452,35 @@ proxy.on('connect', (req, client, head) => {
   if (decision.blocked) {
     stats.blocked++; log('blocked-connect', { host, reason: decision.reason });
     client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
+  }
+
+  const config = readJson(files.config, {});
+  if (config.tlsInspectionEnabled === true && port === 443) {
+    // Explicit opt-in TLS interception. Only the local CA certificate is exported; its private key stays in the app data folder.
+    let context;
+    try { context = localCA.getContext(host); }
+    catch (error) {
+      log('tls-inspection-cert-error', { host, error: error.message });
+      client.end('HTTP/1.1 502 Bad Gateway\\r\\nConnection: close\\r\\n\\r\\n'); return;
+    }
+    client.write('HTTP/1.1 200 Connection Established\\r\\nProxy-Agent: CEOAI-Juwet\\r\\n\\r\\n');
+    if (head && head.length) client.unshift(head);
+    const secure = new tls.TLSSocket(client, {
+      isServer: true, secureContext: context,
+      SNICallback: (servername, callback) => {
+        try { callback(null, localCA.getContext(servername || host)); }
+        catch (error) { callback(error); }
+      }
+    });
+    secure.ceoaiInterceptHost = host;
+    secure.ceoaiTlsIntercepted = true;
+    secure.on('error', error => log('tls-inspection-client-error', { host, error: error.message }));
+    secure.on('secure', () => {
+      log('TLS-INSPECTED', { host, port });
+      interceptedHttp.emit('connection', secure);
+    });
+    client.on('close', () => secure.destroy());
+    return;
   }
 
   let tunnelEstablished = false;
