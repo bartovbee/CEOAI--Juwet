@@ -28,7 +28,7 @@ function certPair(host) {
   leaf.validity.notBefore = new Date(Date.now() - 60000);
   leaf.validity.notAfter = new Date(Date.now() + 86400000);
   leaf.setSubject([{ name: 'commonName', value: host }]); leaf.setIssuer(ca.subject.attributes);
-  leaf.setExtensions([{ name: 'basicConstraints', cA: false }, { name: 'keyUsage', digitalSignature: true, keyEncipherment: true }, { name: 'extKeyUsage', serverAuth: true }, { name: 'subjectAltName', altNames: [{ type: 7, ip: host }] }]);
+  leaf.setExtensions([{ name: 'basicConstraints', cA: false }, { name: 'keyUsage', digitalSignature: true, keyEncipherment: true }, { name: 'extKeyUsage', serverAuth: true }, { name: 'subjectAltName', altNames: [{ type: 7, ip: host }, { type: 2, value: 'localhost' }] }]);
   leaf.sign(keys.privateKey, forge.md.sha256.create());
   return { ca: forge.pki.certificateToPem(ca), key: forge.pki.privateKeyToPem(leafKeys.privateKey), cert: forge.pki.certificateToPem(leaf) };
 }
@@ -57,7 +57,7 @@ function interceptedGet(proxyPort, originPort, caPem) {
       socket.destroy(); if (tlsSocket) tlsSocket.destroy();
       if (err) reject(err); else resolve(result);
     }
-    socket.once('connect', () => socket.write('CONNECT 127.0.0.1:' + originPort + ' HTTP/1.1\r\nHost: 127.0.0.1:' + originPort + '\r\n\r\n'));
+    socket.once('connect', () => socket.write('CONNECT localhost:' + originPort + ' HTTP/1.1\r\nHost: localhost:' + originPort + '\r\n\r\n'));
     socket.on('data', chunk => {
       if (tlsSocket) return;
       responseHeader += chunk.toString('latin1');
@@ -66,8 +66,8 @@ function interceptedGet(proxyPort, originPort, caPem) {
       const statusLine = responseHeader.slice(0, responseHeader.indexOf('\r\n'));
       if (!/^HTTP\/1\.1 200 /.test(statusLine)) return finish(new Error('CONNECT rejected: ' + statusLine));
       socket.removeAllListeners('data');
-      tlsSocket = tls.connect({ socket, ca: caPem, rejectUnauthorized: true, checkServerIdentity: (_host, cert) => tls.checkServerIdentity('127.0.0.1', cert) });
-      tlsSocket.once('secureConnect', () => tlsSocket.write('GET /https-cache HTTP/1.1\r\nHost: 127.0.0.1:' + originPort + '\r\nConnection: close\r\n\r\n'));
+      tlsSocket = tls.connect({ socket, ca: caPem, rejectUnauthorized: true, checkServerIdentity: (_host, cert) => tls.checkServerIdentity('localhost', cert) });
+      tlsSocket.once('secureConnect', () => tlsSocket.write('GET /https-cache HTTP/1.1\r\nHost: localhost:' + originPort + '\r\nConnection: close\r\n\r\n'));
       tlsSocket.on('data', chunk2 => {
         response = Buffer.concat([response, chunk2]);
         const split = response.indexOf('\r\n\r\n');
