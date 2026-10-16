@@ -394,6 +394,14 @@ function handleApi(req, res, pathname) {
 }
 const dashboard = http.createServer((req, res) => {
   try {
+    // Bind-to-loopback alone does not stop browser DNS-rebinding attacks; validate Host too.
+    const rawHost = String(req.headers.host || '').toLowerCase();
+    const hostName = rawHost.startsWith('[') ? rawHost.slice(0, rawHost.indexOf(']') + 1) : rawHost.split(':')[0];
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(hostName)) {
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+      res.end('Dashboard accepts requests only for localhost.');
+      return;
+    }
     const url = new URL(req.url, 'http://127.0.0.1:' + DASHBOARD_PORT);
     if (url.pathname.startsWith('/api/')) {
       const handled = handleApi(req, res, url.pathname);
