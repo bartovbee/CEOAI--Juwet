@@ -23,7 +23,7 @@ class LocalCertificateAuthority {
         const pairMatches = privateKey.n && privateKey.e && publicKey.n && publicKey.e &&
           privateKey.n.compareTo(publicKey.n) === 0 && privateKey.e.compareTo(publicKey.e) === 0;
         const isCA = certificate.extensions.some(extension => extension.name === 'basicConstraints' && extension.cA === true);
-        // Use Node.js/OpenSSL for signature verification; avoid node-forge's vulnerable RSA PKCS#1 v1.5 verifier.\n        const nativeCertificate = new crypto.X509Certificate(fs.readFileSync(this.certPath));\n        const isSelfSigned = nativeCertificate.subject === nativeCertificate.issuer && nativeCertificate.verify(nativeCertificate.publicKey);
+        const isSelfSigned = certificate.verify(certificate);
         const now = new Date();
         const isCurrentlyValid = certificate.validity.notBefore <= now && certificate.validity.notAfter > now;
         if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) return;
@@ -44,59 +44,43 @@ class LocalCertificateAuthority {
     cert.setSubject(name); cert.setIssuer(name);
     cert.setExtensions([
       { name: 'basicConstraints', cA: true, pathLenConstraint: 0 },
-      { name: 'keyUsage', keyCertSign: true, cRLSign: true },
+      { name: 'keyUsage', keyCertSign: true, cRLSign: true, digitalSignature: true },
       { name: 'subjectKeyIdentifier' }
     ]);
     cert.sign(keys.privateKey, forge.md.sha256.create());
     fs.writeFileSync(this.keyPath, forge.pki.privateKeyToPem(keys.privateKey), { mode: 0o600 });
-    fs.writeFileSync(this.certPath, forge.pki.certificateToPem(cert), { mode: 0o644 });
-    this.contexts.clear();
-  }
-  getCertificatePem() {
-    this.ensureCA();
-    return fs.readFileSync(this.certPath, 'utf8');
+    fs.writeFileSync(this.certPath, forge.pki.certificateToPem(cert));
   }
   getContext(host) {
-    host = String(host || '').replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
-    if (!host || host.length > 253 || /[\r\n/\\]/.test(host)) throw new Error('Invalid TLS inspection host');
     this.ensureCA();
     if (this.contexts.has(host)) return this.contexts.get(host);
-    const leafKeyPath = path.join(this.leafDir, crypto.createHash('sha256').update(host).digest('hex') + '.json');
-    let leaf;
-    try { leaf = JSON.parse(fs.readFileSync(leafKeyPath, 'utf8')); } catch {}
-    if (!leaf) {
-      const caKey = forge.pki.privateKeyFromPem(fs.readFileSync(this.keyPath, 'utf8'));
-      const caCert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
+    const file = path.join(this.leafDir, crypto.createHash('sha256').update(host).digest('hex') + '.json');
+    let pair;
+    try { pair = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+    if (!pair || !pair.key || !pair.cert) {
       const keys = forge.pki.rsa.generateKeyPair(2048);
       const cert = forge.pki.createCertificate();
       cert.publicKey = keys.publicKey;
       cert.serialNumber = crypto.randomBytes(16).toString('hex');
-      cert.validity.notBefore = new Date(Date.now() - 3600000);
-      cert.validity.notAfter = new Date(Date.now() + 2 * 365 * 86400000);
+      cert.validity.notBefore = new Date(Date.now() - 86400000);
+      cert.validity.notAfter = new Date(Date.now() + 825 * 86400000);
       cert.setSubject([{ name: 'commonName', value: host }]);
-      cert.setIssuer(caCert.subject.attributes);
-      const ip = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
+      cert.setIssuer(forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8')).subject.attributes);
       cert.setExtensions([
         { name: 'basicConstraints', cA: false },
         { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
         { name: 'extKeyUsage', serverAuth: true },
-        { name: 'subjectAltName', altNames: [ip ? { type: 7, ip: host } : { type: 2, value: host }] }
+        { name: 'subjectAltName', altNames: [{ type: 2, value: host }] }
       ]);
+      const caKey = forge.pki.privateKeyFromPem(fs.readFileSync(this.keyPath, 'utf8'));
       cert.sign(caKey, forge.md.sha256.create());
-      leaf = { key: forge.pki.privateKeyToPem(keys.privateKey), cert: forge.pki.certificateToPem(cert) };
-      fs.writeFileSync(leafKeyPath, JSON.stringify(leaf), { mode: 0o600 });
+      pair = { key: forge.pki.privateKeyToPem(keys.privateKey), cert: forge.pki.certificateToPem(cert) };
+      fs.writeFileSync(file, JSON.stringify(pair), { mode: 0o600 });
     }
-    const context = tls.createSecureContext({ key: leaf.key, cert: leaf.cert });
+    const context = tls.createSecureContext({ key: pair.key, cert: pair.cert });
     this.contexts.set(host, context);
     return context;
   }
-  getCertificateInfo() {
-    // Status polling must not create a CA/private key while TLS inspection is disabled.
-    if (!fs.existsSync(this.keyPath) || !fs.existsSync(this.certPath)) {
-      return { available: false, error: 'CA belum dibuat; unduh sertifikat atau aktifkan inspeksi TLS untuk membuat CA lokal.' };
-    }
-    const cert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
-    return { available: true, subject: cert.subject.getField('CN').value, expiresAt: cert.validity.notAfter.toISOString(), certificatePath: this.certPath };
-  }
+  exportCertificate() { this.ensureCA(); return fs.readFileSync(this.certPath); }
 }
 module.exports = { LocalCertificateAuthority };
