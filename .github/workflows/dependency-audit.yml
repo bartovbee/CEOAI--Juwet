@@ -1,0 +1,36 @@
+name: CEOAI Juwet dependency audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/dependency-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ceoai-juwet-dependency-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install and lock dependency graph
+        run: npm install --package-lock-only
+      - name: Generate complete npm audit report
+        shell: bash
+        run: |
+          npm audit --json > npm-audit.json || audit_exit=$?
+          echo "npm audit exit code: ${audit_exit:-0}"
+          node -e "const r=require('./npm-audit.json'); console.log(JSON.stringify({metadata:r.metadata?.vulnerabilities, advisories:Object.entries(r.vulnerabilities||{}).map(([name,v])=>({name,severity:v.severity,isDirect:v.isDirect,range:v.range,fixAvailable:v.fixAvailable,via:v.via.map(x=>typeof x==='string'?x:{title:x.title,url:x.url,range:x.range})}))},null,2))"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CEOAI-Juwet-dependency-audit
+          path: npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
