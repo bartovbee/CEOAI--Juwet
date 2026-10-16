@@ -231,6 +231,15 @@ function testConnectTunnel(proxyPort, echoPort) {
     await testConnectStatus(proxyPort, 'user@127.0.0.1:' + echoPort, 400);
     await testConnectStatus(proxyPort, '127.0.0.1:0', 400);
 
+    const invalidNumericConfig = await httpRequest({
+      host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
+      headers: { 'content-type': 'application/json' }
+    }, JSON.stringify({ autoCleanHours: 'not-a-number', maxObjectBytes: 'not-a-number' }));
+    assert.strictEqual(invalidNumericConfig.status, 200);
+    const sanitizedConfig = JSON.parse(invalidNumericConfig.body).config;
+    assert.strictEqual(sanitizedConfig.autoCleanHours, 24, 'invalid auto-clean interval must fall back to 24 hours');
+    assert.strictEqual(sanitizedConfig.maxObjectBytes, 2000000, 'invalid cache size must fall back to 2 MB');
+
     const offlineSettings = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
       headers: { 'content-type': 'application/json' }
@@ -252,6 +261,8 @@ function testConnectTunnel(proxyPort, echoPort) {
       headers: { 'content-type': 'application/json' }
     }, JSON.stringify({ filterMode: 'allow' }));
     assert.strictEqual(mode.status, 200);
+    const emptyAllowlistDenied = await proxyGet(proxyPort, originPort, 'empty-allowlist-check');
+    assert.strictEqual(emptyAllowlistDenied.status, 403, 'empty allowlist must fail closed');
     await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/allowed', method: 'POST',
       headers: { 'content-type': 'application/json' }
