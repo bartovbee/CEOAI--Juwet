@@ -110,6 +110,8 @@ function interceptedGet(proxyPort, originPort, caPem) {
     const initial = await request(dashboardPort, '/api/tls/status');
     assert.strictEqual(initial.status, 200);
     assert.strictEqual(JSON.parse(initial.body).enabled, false, 'TLS inspection must be disabled by default');
+    assert.strictEqual(JSON.parse(initial.body).ca.available, false, 'status polling must not create a CA while TLS inspection is disabled');
+    assert.strictEqual(fs.existsSync(path.join(dataDir, 'appdata', 'tls', 'ca-key.pem')), false, 'CA private key must not be created by status polling');
     const ca = await request(dashboardPort, '/api/tls/ca.pem');
     assert.strictEqual(ca.status, 200);
     const config = await request(dashboardPort, '/api/config', 'POST', JSON.stringify({ tlsInspectionEnabled: true, tlsInspectionPorts: [originPort] }));
