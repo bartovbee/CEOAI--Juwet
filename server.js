@@ -301,7 +301,7 @@ function proxyRequest(req, res) {
   recordClient(req, 'HTTP');
   let original;
   try {
-    original = req.ceoaiInterceptHost ? new URL('https://' + req.ceoaiInterceptHost + (String(req.url || '').startsWith('/') ? req.url : '/' + req.url)) : new URL(req.url);
+    original = req.socket.ceoaiInterceptHost ? new URL('https://' + req.socket.ceoaiInterceptHost + (String(req.url || '').startsWith('/') ? req.url : '/' + req.url)) : new URL(req.url);
     if (!original.hostname || !['http:', 'https:'].includes(original.protocol)) throw new Error('unsupported url');
   } catch {
     res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
@@ -330,7 +330,7 @@ function proxyRequest(req, res) {
   const requestCacheControl = String(req.headers['cache-control'] || '').toLowerCase();
   const requestForcesRefresh = /(?:^|,)[ \t]*(?:no-cache|no-store|max-age[ \t]*=[ \t]*0)(?:[ \t]*(?:,|$))/.test(requestCacheControl) ||
     String(req.headers.pragma || '').toLowerCase().includes('no-cache');
-  const httpsAuthorizedForCache = target.protocol !== 'https:' || req.ceoaiTlsIntercepted === true;
+  const httpsAuthorizedForCache = target.protocol !== 'https:' || req.socket.ceoaiTlsIntercepted === true;
   const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && config.cacheEnabled !== false && httpsAuthorizedForCache;
   const key = cacheKey(target.href), cacheFile = path.join(CACHE_DIR, key + '.json');
   if (canCache) {
