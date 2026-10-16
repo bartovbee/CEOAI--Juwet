@@ -492,10 +492,13 @@ function proxyRequest(req, res) {
       const expiresTtl = Number.isFinite(expiresAtHeader) ? Math.floor((expiresAtHeader - Date.now()) / 1000) : 0;
       const requestedTtl = match ? Number(match[1]) : expiresTtl;
       const explicitlyFresh = requestedTtl > 0 && (Boolean(match) || expiresTtl > 0 || directives.includes('public'));
+      const responsePragma = String(upstreamRes.headers.pragma || '').toLowerCase();
+      const hasNoCacheDirective = directives.some(value => /^no-cache(?:[ \t]*=|$)/.test(value));
       const mayStore = explicitlyFresh &&
-        !directives.includes('private') &&
-        !directives.includes('no-store') &&
-        !directives.includes('no-cache') &&
+        !directives.some(value => /^private(?:[ \t]*=|$)/.test(value)) &&
+        !directives.some(value => /^no-store(?:[ \t]*=|$)/.test(value)) &&
+        !hasNoCacheDirective &&
+        !responsePragma.split(',').some(value => value.trim() === 'no-cache') &&
         !directives.includes('must-revalidate') &&
         requestedTtl > 0;
       const ttl = Math.min(3600, Math.max(1, requestedTtl));
