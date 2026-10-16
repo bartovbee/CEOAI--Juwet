@@ -125,7 +125,18 @@ function interceptedGet(proxyPort, originPort, caPem) {
     assert.strictEqual(second.cache, 'HIT');
     assert.strictEqual(second.body, 'secure-origin-1');
     assert.strictEqual(originCount, 1, 'HTTPS HIT must not reach upstream');
-    console.log('TLS inspection + HTTPS cache MISS/HIT: PASS');
+
+    const caCertPath = path.join(dataDir, 'appdata', 'tls', 'ca-cert.pem');
+    fs.writeFileSync(caCertPath, 'corrupted-certificate');
+    const repairedCa = await request(dashboardPort, '/api/tls/ca.pem');
+    assert.strictEqual(repairedCa.status, 200, 'invalid persisted CA must be regenerated');
+    assert.notStrictEqual(repairedCa.body, ca.body, 'CA rotation should replace invalid certificate material');
+    const afterRepair = await interceptedGet(proxyPort, originPort, repairedCa.body);
+    assert.strictEqual(afterRepair.status, 200, afterRepair.header);
+    assert.strictEqual(afterRepair.cache, 'HIT');
+    assert.strictEqual(afterRepair.body, 'secure-origin-1');
+    assert.strictEqual(originCount, 1, 'repairing CA must preserve valid cached HTTPS object');
+    console.log('TLS inspection + HTTPS cache MISS/HIT + CA corruption recovery: PASS');
   } finally {
     child.kill(); await new Promise(resolve => origin.close(resolve)); fs.rmSync(dataDir, { recursive: true, force: true });
   }
