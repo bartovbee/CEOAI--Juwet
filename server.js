@@ -382,8 +382,10 @@ const dashboard = http.createServer((req, res) => {
 dashboard.listen(DASHBOARD_PORT, '127.0.0.1', () => console.log('CEOAI Juwet dashboard http://127.0.0.1:' + DASHBOARD_PORT));
 const cleanerTimer = setInterval(() => {
   const config = readJson(files.config, {});
-  const hours = Math.max(0, Number(config.autoCleanHours || 0));
-  const last = Number(config.lastCacheCleanAt || Date.now());
+  const rawHours = Number(config.autoCleanHours);
+  const hours = Number.isFinite(rawHours) ? Math.max(0, Math.min(168, rawHours)) : 24;
+  const rawLast = Number(config.lastCacheCleanAt);
+  const last = Number.isFinite(rawLast) && rawLast > 0 ? rawLast : Date.now();
   if (hours > 0 && Date.now() - last >= hours * 3600000) {
     const removed = cleanExpiredCache();
     config.lastCacheCleanAt = Date.now();
@@ -482,7 +484,8 @@ function proxyRequestImpl(req, res) {
   }
   const upstream = transport.request(target, { method: req.method, headers, timeout: 20000 }, upstreamRes => {
     const responseHeaders = cleanHeaders(upstreamRes.headers);
-    const maxBytes = Math.max(1024, Number(config.maxObjectBytes || 2000000));
+    const rawMaxBytes = Number(config.maxObjectBytes);
+    const maxBytes = Number.isFinite(rawMaxBytes) ? Math.max(1024, Math.min(20000000, rawMaxBytes)) : 2000000;
     const cacheHeadersAllowed = canCache &&
       upstreamRes.statusCode === 200 &&
       !upstreamRes.headers['set-cookie'] &&
