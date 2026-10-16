@@ -140,6 +140,8 @@ function testConnectTunnel(proxyPort, echoPort) {
       'no-store': 'no-store, max-age=60',
       'no-cache': 'no-cache, max-age=60',
       'must-revalidate': 'public, max-age=60, must-revalidate',
+      'no-cache-fields': 'public, max-age=60, no-cache="set-cookie"',
+      'pragma-no-cache': 'public, max-age=60',
       'no-freshness': ''
     };
     const policy = policies[req.url.slice(1)];
@@ -149,6 +151,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     } else {
       headers['cache-control'] = 'public, max-age=60';
     }
+    if (req.url === '/pragma-no-cache') headers.pragma = 'no-cache';
     res.writeHead(200, headers);
     res.end('origin-response-' + originCount);
   });
@@ -192,7 +195,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(afterBypass.body, 'origin-response-1');
     assert.strictEqual(originCount, 2, 'request no-cache must bypass cache and preserve existing object');
 
-    for (const pathName of ['private', 'no-store', 'no-cache', 'must-revalidate', 'no-freshness']) {
+    for (const pathName of ['private', 'no-store', 'no-cache', 'must-revalidate', 'no-cache-fields', 'pragma-no-cache', 'no-freshness']) {
       const before = originCount;
       const firstPolicyRequest = await proxyGet(proxyPort, originPort, pathName);
       assert.strictEqual(firstPolicyRequest.status, 200, pathName + ' first request should succeed');
