@@ -77,8 +77,11 @@ class LocalCertificateAuthority {
     return context;
   }
   getCertificateInfo() {
-    this.ensureCA();
-    const cert = forge.pki.certificateFromPem(this.getCertificatePem());
+    // Status polling must not create a CA/private key while TLS inspection is disabled.
+    if (!fs.existsSync(this.keyPath) || !fs.existsSync(this.certPath)) {
+      return { available: false, error: 'CA belum dibuat; unduh sertifikat atau aktifkan inspeksi TLS untuk membuat CA lokal.' };
+    }
+    const cert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
     return { available: true, subject: cert.subject.getField('CN').value, expiresAt: cert.validity.notAfter.toISOString(), certificatePath: this.certPath };
   }
 }
