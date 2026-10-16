@@ -417,6 +417,18 @@ const dashboard = http.createServer((req, res) => {
     return jsonResponse(res, 500, { ok: false, error: 'Dashboard gagal memproses permintaan.' });
   }
 });
+function handleListenError(serverName, port, error) {
+  const detail = { server: serverName, port, code: error.code || 'UNKNOWN', error: error.message };
+  console.error('CEOAI Juwet failed to bind ' + serverName + ' port ' + port + ': ' + error.message);
+  log('server-listen-error', detail);
+  if (process.listenerCount('ceoai-server-error') > 0) {
+    process.emit('ceoai-server-error', detail);
+  } else {
+    // A standalone process must not remain half-started with only one listener alive.
+    process.exit(1);
+  }
+}
+dashboard.on('error', error => handleListenError('dashboard', DASHBOARD_PORT, error));
 dashboard.listen(DASHBOARD_PORT, '127.0.0.1', () => console.log('CEOAI Juwet dashboard http://127.0.0.1:' + DASHBOARD_PORT));
 const cleanerTimer = setInterval(() => {
   const config = readJson(files.config, {});
@@ -703,6 +715,7 @@ proxy.on('connect', (req, client, head) => {
   client.on('error', () => upstream.destroy());
   client.on('close', () => upstream.destroy());
 });
+proxy.on('error', error => handleListenError('proxy', PROXY_PORT, error));
 proxy.listen(PROXY_PORT, '0.0.0.0', () => console.log('CEOAI Juwet proxy listening on ' + PROXY_PORT));
 if (process.pkg && process.platform === 'win32' && process.env.CEOAI_OPEN_BROWSER !== '0') {
   const openTimer = setTimeout(() => {
