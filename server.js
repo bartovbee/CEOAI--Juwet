@@ -497,7 +497,7 @@ function proxyRequestImpl(req, res) {
         Object.entries(cached.headers).every(([name, value]) =>
           /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) &&
           (typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string))) &&
-          !/[\\r\\n]/.test(Array.isArray(value) ? value.join('') : value));
+          !/[\r\n]/.test(Array.isArray(value) ? value.join('') : value));
       const validBody = cached && typeof cached.body === 'string' &&
         /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(cached.body);
       const valid = cached && cached.statusCode === 200 && Number.isFinite(Number(cached.expiresAt)) &&
