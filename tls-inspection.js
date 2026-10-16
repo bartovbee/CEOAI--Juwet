@@ -15,7 +15,18 @@ class LocalCertificateAuthority {
     fs.mkdirSync(this.leafDir, { recursive: true });
   }
   ensureCA() {
-    if (fs.existsSync(this.keyPath) && fs.existsSync(this.certPath)) return;
+    if (fs.existsSync(this.keyPath) && fs.existsSync(this.certPath)) {
+      try {
+        const privateKey = forge.pki.privateKeyFromPem(fs.readFileSync(this.keyPath, 'utf8'));
+        const certificate = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
+        const publicKey = certificate.publicKey;
+        const pairMatches = privateKey.n && privateKey.e && publicKey.n && publicKey.e &&
+          privateKey.n.compareTo(publicKey.n) === 0 && privateKey.e.compareTo(publicKey.e) === 0;
+        const isCA = certificate.extensions.some(extension => extension.name === 'basicConstraints' && extension.cA === true);
+        if (pairMatches && isCA && certificate.validity.notAfter > new Date()) return;
+      } catch {}
+      // Invalid, expired, or mismatched CA files cannot be trusted; rotate and clear leaves.
+    }
     fs.mkdirSync(this.dir, { recursive: true });
     // If either CA file is missing, rotate the CA and discard host leaves signed by the previous CA.
     for (const name of fs.readdirSync(this.leafDir)) { try { fs.unlinkSync(path.join(this.leafDir, name)); } catch {} }
@@ -45,8 +56,8 @@ class LocalCertificateAuthority {
   getContext(host) {
     host = String(host || '').replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
     if (!host || host.length > 253 || /[\r\n/\\]/.test(host)) throw new Error('Invalid TLS inspection host');
-    if (this.contexts.has(host)) return this.contexts.get(host);
     this.ensureCA();
+    if (this.contexts.has(host)) return this.contexts.get(host);
     const leafKeyPath = path.join(this.leafDir, crypto.createHash('sha256').update(host).digest('hex') + '.json');
     let leaf;
     try { leaf = JSON.parse(fs.readFileSync(leafKeyPath, 'utf8')); } catch {}
