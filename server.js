@@ -466,13 +466,7 @@ proxy.on('connect', (req, client, head) => {
     }
     client.write('HTTP/1.1 200 Connection Established\r\nProxy-Agent: CEOAI-Juwet\r\n\r\n');
     if (head && head.length) client.unshift(head);
-    const secure = new tls.TLSSocket(client, {
-      isServer: true, secureContext: context,
-      SNICallback: (servername, callback) => {
-        try { callback(null, localCA.getContext(servername || host)); }
-        catch (error) { callback(error); }
-      }
-    });
+    const secure = new tls.TLSSocket(client, { isServer: true, secureContext: context });
     secure.ceoaiInterceptHost = (host.includes(':') ? '[' + host + ']' : host) + (port === 443 ? '' : ':' + port);
     secure.ceoaiTlsIntercepted = true;
     secure.on('error', error => log('tls-inspection-client-error', { host, error: error.message }));
