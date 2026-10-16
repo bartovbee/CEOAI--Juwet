@@ -1,7 +1,7 @@
 name: CEOAI Juwet dependency audit
 on:
   push:
-    branches: [main]
+    branches: [main, fix/cache-integration-20261016]
     paths:
       - 'package.json'
       - 'package-lock.json'
