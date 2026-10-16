@@ -35,7 +35,15 @@ try {
     $client.EndConnect($connect)
   } finally { $client.Dispose() }
 
-  Write-Host 'Packaged EXE smoke tests passed: dashboard API, embedded HTML/logo assets, and proxy listener.'
+  # Exercise real cache paths inside the packaged Windows EXE, not only its listener.
+  $env:CEOAI_TEST_EXECUTABLE = $exe
+  node tests/integration.js
+  if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE HTTP cache integration failed' }
+  node tests/tls-integration.js
+  if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE HTTPS TLS-inspection/cache integration failed' }
+  Remove-Item Env:CEOAI_TEST_EXECUTABLE -ErrorAction SilentlyContinue
+
+  Write-Host 'Packaged EXE verified: dashboard, HTTP MISS/HIT, HTTPS TLS-inspection MISS/HIT, upstream request counts, and CA recovery.'
 } finally {
   if ($proc -and -not $proc.HasExited) {
     Stop-Process -Id $proc.Id -Force
