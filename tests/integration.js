@@ -326,6 +326,24 @@ function testConnectTunnel(proxyPort, echoPort) {
     }
     for (let round = 0; round < 10; round++) await testConnectTunnel(proxyPort, echoPort);
 
+    // A manually edited/corrupt config must not silently disable cache storage.
+    const configPath = path.join(dataDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      cacheEnabled: true, cacheOnly: false, maxObjectBytes: 'invalid',
+      autoCleanHours: 'invalid', filterMode: 'block', tlsInspectionEnabled: false
+    }));
+    const invalidConfigFirst = await proxyGet(proxyPort, originPort, 'invalid-config-runtime');
+    assert.strictEqual(invalidConfigFirst.status, 200);
+    assert.strictEqual(invalidConfigFirst.headers['x-ceoai-cache'], 'MISS');
+    const invalidConfigSecond = await proxyGet(proxyPort, originPort, 'invalid-config-runtime');
+    assert.strictEqual(invalidConfigSecond.status, 200);
+    assert.strictEqual(invalidConfigSecond.headers['x-ceoai-cache'], 'HIT', 'invalid persisted numeric settings should use safe defaults');
+    const restoreConfig = await httpRequest({
+      host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
+      headers: { 'content-type': 'application/json' }
+    }, JSON.stringify({ cacheEnabled: true, cacheOnly: false, autoCleanHours: 24, maxObjectBytes: 2000000, filterMode: 'block', tlsInspectionEnabled: false }));
+    assert.strictEqual(restoreConfig.status, 200);
+
     const logs = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/logs' });
     assert.strictEqual(logs.status, 200);
     assert(logs.body.includes('HIT'));
