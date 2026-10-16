@@ -455,7 +455,7 @@ proxy.on('connect', (req, client, head) => {
   }
 
   const config = readJson(files.config, {});
-  if (config.tlsInspectionEnabled === true && port === 443) {
+  if (config.tlsInspectionEnabled === true) {
     // Explicit opt-in TLS interception. Only the local CA certificate is exported; its private key stays in the app data folder.
     let context;
     try { context = localCA.getContext(host); }
