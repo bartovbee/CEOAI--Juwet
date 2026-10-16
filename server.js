@@ -493,10 +493,15 @@ function proxyRequestImpl(req, res) {
   if (canCache) {
     try {
       const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      const forbiddenCachedHeaders = new Set([
+        'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+        'te', 'trailer', 'transfer-encoding', 'upgrade', 'content-length', 'set-cookie'
+      ]);
       const validHeaders = cached && cached.headers && typeof cached.headers === 'object' && !Array.isArray(cached.headers) &&
         Object.entries(cached.headers).every(([name, value]) =>
-          /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) &&
-          (typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string))) &&
+          /^[!#$%&'*+.^_\`|~0-9A-Za-z-]+$/.test(name) &&
+          !forbiddenCachedHeaders.has(name.toLowerCase()) &&
+          (typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string'))) &&
           !/[\r\n]/.test(Array.isArray(value) ? value.join('') : value));
       const validBody = cached && typeof cached.body === 'string' &&
         /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(cached.body);
