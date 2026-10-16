@@ -205,15 +205,6 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(oversizedConfig.status, 413, 'oversized dashboard request should return HTTP 413 without resetting the connection');
 
 
-    const hopByHop = await httpRequest({
-      host: '127.0.0.1', port: proxyPort, method: 'GET',
-      path: 'http://127.0.0.1:' + originPort + '/hop-by-hop',
-      headers: { host: '127.0.0.1:' + originPort, connection: 'x-client-hop', 'x-client-hop': 'must-not-cross-proxy' }
-    });
-    assert.strictEqual(hopByHop.status, 200);
-    assert.strictEqual(receivedConnectionNominatedHeader, false, 'Connection-nominated request headers must not reach upstream');
-    assert.strictEqual(hopByHop.headers['x-origin-hop'], undefined, 'Connection-nominated response headers must not reach clients');
-
     const first = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(first.status, 200);
     assert.strictEqual(first.headers['x-ceoai-cache'], 'MISS');
@@ -237,6 +228,16 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(afterBypass.headers['x-ceoai-cache'], 'HIT');
     assert.strictEqual(afterBypass.body, 'origin-response-1');
     assert.strictEqual(originCount, 2, 'request no-cache must bypass cache and preserve existing object');
+
+    const hopByHop = await httpRequest({
+      host: '127.0.0.1', port: proxyPort, method: 'GET',
+      path: 'http://127.0.0.1:' + originPort + '/hop-by-hop',
+      headers: { host: '127.0.0.1:' + originPort, connection: 'x-client-hop', 'x-client-hop': 'must-not-cross-proxy' }
+    });
+    assert.strictEqual(hopByHop.status, 200);
+    assert.strictEqual(receivedConnectionNominatedHeader, false, 'Connection-nominated request headers must not reach upstream');
+    assert.strictEqual(hopByHop.headers['x-origin-hop'], undefined, 'Connection-nominated response headers must not reach clients');
+
 
     for (const pathName of ['private', 'no-store', 'no-cache', 'must-revalidate', 'no-cache-fields', 'pragma-no-cache', 'no-freshness']) {
       const before = originCount;
