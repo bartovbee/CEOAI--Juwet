@@ -298,7 +298,7 @@ function handleApi(req, res, pathname) {
       try {
         const host = normalizeHost(JSON.parse(body).host);
         if (!host || host.length > 253 || /[^a-z0-9.:[\]-]/i.test(host)) return jsonResponse(res, 400, { ok: false, error: 'Domain tidak valid' });
-        const list = readJson(dest, []);
+        const list = readArray(dest);
         if (!list.includes(host)) list.push(host);
         writeJson(dest, list);
         log(kind + '-filter-add', { host });
