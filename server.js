@@ -275,7 +275,10 @@ function handleApi(req, res, pathname) {
         writeJson(files.config, next);
         log('config-updated', { cacheEnabled: next.cacheEnabled, filterMode: next.filterMode, tlsInspectionEnabled: next.tlsInspectionEnabled });
         jsonResponse(res, 200, { ok: true, config: next });
-      } catch { jsonResponse(res, 400, { ok: false, error: 'JSON tidak valid' }); }
+      } catch (error) {
+        const invalidJson = error instanceof SyntaxError;
+        jsonResponse(res, invalidJson ? 400 : 500, { ok: false, error: invalidJson ? 'JSON tidak valid' : 'Konfigurasi gagal disimpan: ' + error.message });
+      }
     });
     return;
   }
