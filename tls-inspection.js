@@ -66,7 +66,7 @@ class LocalCertificateAuthority {
         { name: 'basicConstraints', cA: false },
         { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
         { name: 'extKeyUsage', serverAuth: true },
-        { name: 'subjectAltName', altNames: [{ type: ip ? 7 : 2, value: host }] }
+        { name: 'subjectAltName', altNames: [ip ? { type: 7, ip: host } : { type: 2, value: host }] }
       ]);
       cert.sign(caKey, forge.md.sha256.create());
       leaf = { key: forge.pki.privateKeyToPem(keys.privateKey), cert: forge.pki.certificateToPem(cert) };
