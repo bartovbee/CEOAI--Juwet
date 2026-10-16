@@ -79,10 +79,10 @@ function testConnectStatus(proxyPort, authority, expectedStatus) {
       socket.destroy();
       if (error) reject(error); else resolve();
     }
-    socket.on('connect', () => socket.write('CONNECT ' + authority + ' HTTP/1.1\\r\\nHost: ' + authority + '\\r\\n\\r\\n'));
+    socket.on('connect', () => socket.write('CONNECT ' + authority + ' HTTP/1.1\r\nHost: ' + authority + '\r\n\r\n'));
     socket.on('data', chunk => {
       data += chunk.toString('latin1');
-      const end = data.indexOf('\\r\\n');
+      const end = data.indexOf('\r\n');
       if (end >= 0) {
         const statusLine = data.slice(0, end);
         const match = statusLine.match(/^HTTP\/1\.1 (\d{3})/);
