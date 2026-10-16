@@ -1,7 +1,7 @@
 name: CEOAI Juwet Windows x64
 on:
   push:
-    branches: [main, fix/cache-behavior-integration, feature/auto-generate-ca]
+    branches: [main, fix/cache-behavior-integration, feature/auto-generate-ca, fix/tls-revocation-bypass]
   workflow_dispatch:
 permissions:
   contents: read
