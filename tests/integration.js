@@ -66,6 +66,34 @@ function closeServer(server) {
     server.close(() => resolve());
   });
 }
+function testConnectStatus(proxyPort, authority, expectedStatus) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(proxyPort, '127.0.0.1');
+    let data = '';
+    let completed = false;
+    const timer = setTimeout(() => finish(new Error('CONNECT status test timeout for ' + authority)), 5000);
+    function finish(error) {
+      if (completed) return;
+      completed = true;
+      clearTimeout(timer);
+      socket.destroy();
+      if (error) reject(error); else resolve();
+    }
+    socket.on('connect', () => socket.write('CONNECT ' + authority + ' HTTP/1.1\\r\\nHost: ' + authority + '\\r\\n\\r\\n'));
+    socket.on('data', chunk => {
+      data += chunk.toString('latin1');
+      const end = data.indexOf('\\r\\n');
+      if (end >= 0) {
+        const statusLine = data.slice(0, end);
+        const match = statusLine.match(/^HTTP\\/1\\.1 (\\d{3})/);
+        if (!match) return finish(new Error('Invalid CONNECT response: ' + statusLine));
+        if (Number(match[1]) !== expectedStatus) return finish(new Error('Expected CONNECT ' + expectedStatus + ' but got ' + statusLine));
+        finish();
+      }
+    });
+    socket.on('error', finish);
+  });
+}
 function testConnectTunnel(proxyPort, echoPort) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(proxyPort, '127.0.0.1');
@@ -198,7 +226,10 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(addBlock.status, 200);
     const blocked = await proxyGet(proxyPort, originPort, 'blocked-check');
     assert.strictEqual(blocked.status, 403);
+    await testConnectStatus(proxyPort, '127.0.0.1:' + echoPort, 403);
     await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/blocked/127.0.0.1', method: 'DELETE' });
+    await testConnectStatus(proxyPort, 'user@127.0.0.1:' + echoPort, 400);
+    await testConnectStatus(proxyPort, '127.0.0.1:0', 400);
 
     const offlineSettings = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
@@ -208,6 +239,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const offlineMiss = await proxyGet(proxyPort, originPort, 'offline-miss');
     assert.strictEqual(offlineMiss.status, 504);
     assert.strictEqual(offlineMiss.headers['x-ceoai-cache'], 'OFFLINE-MISS');
+    await testConnectStatus(proxyPort, '127.0.0.1:' + echoPort, 504);
     assert.strictEqual(originCount, 12, 'offline mode must not contact upstream');
 
     await httpRequest({
@@ -242,7 +274,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const logs = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/logs' });
     assert.strictEqual(logs.status, 200);
     assert(logs.body.includes('HIT'));
-    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, request no-cache bypass, private/no-store/no-cache/must-revalidate/no-freshness policies, rewrite, block/allow filters, offline-only mode, cache cleaner, HTTPS CONNECT tunnel, and logs.');
+    console.log('CEOAI Juwet integration tests passed: dashboard, HTTP MISS/HIT, request no-cache bypass, private/no-store/no-cache/must-revalidate/no-freshness policies, rewrite, block/allow filters, offline-only mode, cache cleaner, HTTPS CONNECT tunnel, CONNECT block/offline/malformed-authority handling, and logs.');
   } finally {
     child.kill();
     await Promise.race([new Promise(resolve => child.once('exit', resolve)), delay(2000)]);
