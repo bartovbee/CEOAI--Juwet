@@ -565,7 +565,7 @@ proxy.on('connect', (req, client, head) => {
   if (isRemoteLoopbackTarget(req, host)) {
     stats.blocked++;
     logBlockedLocalTarget(req, host);
-    client.end('HTTP/1.1 403 Forbidden\\r\\nConnection: close\\r\\n\\r\\n');
+    client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
     return;
   }
   const decision = filterDecision(host);
