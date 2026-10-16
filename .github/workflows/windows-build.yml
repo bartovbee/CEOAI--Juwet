@@ -1,7 +1,7 @@
 name: CEOAI Juwet Windows x64
 on:
   push:
-    branches: [main]
+    branches: [main, fix/cache-behavior-integration]
   workflow_dispatch:
 permissions:
   contents: read

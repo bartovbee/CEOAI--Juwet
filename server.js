@@ -593,7 +593,8 @@ function proxyRequestImpl(req, res) {
         !directives.includes('must-revalidate') &&
         requestedTtl > 0;
       const ttl = Math.min(3600, Math.max(1, requestedTtl));
-      if (cacheHeadersAllowed && !tooLarge && size <= maxBytes && mayStore) {
+      // Storage is allowed only for eligible HTTP requests or explicitly intercepted HTTPS.
+      if (canCache && cacheHeadersAllowed && !tooLarge && size <= maxBytes && mayStore) {
         const body = Buffer.concat(chunks);
         const storedHeaders = cleanHeaders(upstreamRes.headers);
         delete storedHeaders['set-cookie'];
@@ -694,6 +695,8 @@ proxy.on('connect', (req, client, head) => {
     return;
   }
 
+  // Plain CONNECT is an end-to-end TCP tunnel: never inspect or cache its encrypted payload.
+  stats.bypass++;
   let tunnelEstablished = false;
   const upstream = net.connect({ port, host });
   const timeout = setTimeout(() => {
