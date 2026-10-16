@@ -36,6 +36,10 @@ function writeJson(file, value) {
     try { if (fs.existsSync(temp)) fs.unlinkSync(temp); } catch {}
   }
 }
+function readArray(file) {
+  const value = readJson(file, []);
+  return Array.isArray(value) ? value : [];
+}
 if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, cacheOnly: false, maxObjectBytes: 2000000, filterMode: 'block', autoCleanHours: 24, lastCacheCleanAt: Date.now(), tlsInspectionEnabled: false, tlsInspectionPorts: [443] });
 if (!fs.existsSync(files.blocked)) writeJson(files.blocked, []);
 if (!fs.existsSync(files.allowed)) writeJson(files.allowed, []);
@@ -108,10 +112,8 @@ function matchesHost(host, list) {
 }
 function filterDecision(host) {
   const config = readJson(files.config, { filterMode: 'block' });
-  const blockedRaw = readJson(files.blocked, []);
-  const allowedRaw = readJson(files.allowed, []);
-  const blocked = Array.isArray(blockedRaw) ? blockedRaw : [];
-  const allowed = Array.isArray(allowedRaw) ? allowedRaw : [];
+  const blocked = readArray(files.blocked);
+  const allowed = readArray(files.allowed);
   if (config.filterMode === 'allow' && !matchesHost(host, allowed)) {
     return { blocked: true, reason: 'not-allowlisted' };
   }
@@ -230,8 +232,8 @@ function handleApi(req, res, pathname) {
     });
     return;
   }
-  if (pathname === '/api/blocked' && req.method === 'GET') return jsonResponse(res, 200, readJson(files.blocked, []));
-  if (pathname === '/api/allowed' && req.method === 'GET') return jsonResponse(res, 200, readJson(files.allowed, []));
+  if (pathname === '/api/blocked' && req.method === 'GET') return jsonResponse(res, 200, readArray(files.blocked));
+  if (pathname === '/api/allowed' && req.method === 'GET') return jsonResponse(res, 200, readArray(files.allowed));
   if ((pathname === '/api/blocked' || pathname === '/api/allowed') && req.method === 'POST') {
     const dest = pathname === '/api/blocked' ? files.blocked : files.allowed;
     const kind = pathname === '/api/blocked' ? 'blocked' : 'allowed';
@@ -262,7 +264,7 @@ function handleApi(req, res, pathname) {
     writeJson(files.allowed, list); log('allow-filter-remove', { host });
     return jsonResponse(res, 200, { ok: true, hosts: list });
   }
-  if (pathname === '/api/rewrite' && req.method === 'GET') return jsonResponse(res, 200, readJson(files.rewrites, []));
+  if (pathname === '/api/rewrite' && req.method === 'GET') return jsonResponse(res, 200, readArray(files.rewrites));
   if (pathname === '/api/rewrite' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; if (body.length > 20000) req.destroy(); });
