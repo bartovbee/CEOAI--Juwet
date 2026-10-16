@@ -493,14 +493,26 @@ function proxyRequestImpl(req, res) {
   if (canCache) {
     try {
       const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-      if (cached.expiresAt > Date.now()) {
+      const validHeaders = cached && cached.headers && typeof cached.headers === 'object' && !Array.isArray(cached.headers) &&
+        Object.entries(cached.headers).every(([name, value]) =>
+          /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) &&
+          (typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string))) &&
+          !/[\\r\\n]/.test(Array.isArray(value) ? value.join('') : value));
+      const validBody = cached && typeof cached.body === 'string' &&
+        /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(cached.body);
+      const valid = cached && cached.statusCode === 200 && Number.isFinite(Number(cached.expiresAt)) &&
+        Number(cached.expiresAt) > Date.now() && validHeaders && validBody;
+      if (valid) {
         const body = Buffer.from(cached.body, 'base64');
         stats.hits++; stats.bytesOut += body.length;
         log('HIT', { host, url: target.origin + target.pathname, statusCode: cached.statusCode, bytes: body.length });
         res.writeHead(cached.statusCode, { ...cached.headers, 'x-ceoai-cache': 'HIT', 'content-length': body.length });
         res.end(body); return;
       }
-    } catch {}
+      try { fs.unlinkSync(cacheFile); } catch {}
+    } catch {
+      try { fs.unlinkSync(cacheFile); } catch {}
+    }
     stats.misses++;
   } else stats.bypass++;
 
