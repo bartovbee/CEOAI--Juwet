@@ -363,15 +363,21 @@ function handleApi(req, res, pathname) {
   return false;
 }
 const dashboard = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://127.0.0.1:' + DASHBOARD_PORT);
-  if (url.pathname.startsWith('/api/')) {
-    const handled = handleApi(req, res, url.pathname);
-    if (handled !== false) return;
-    return jsonResponse(res, 404, { ok: false, error: 'API route not found' });
+  try {
+    const url = new URL(req.url, 'http://127.0.0.1:' + DASHBOARD_PORT);
+    if (url.pathname.startsWith('/api/')) {
+      const handled = handleApi(req, res, url.pathname);
+      if (handled !== false) return;
+      return jsonResponse(res, 404, { ok: false, error: 'API route not found' });
+    }
+    if (url.pathname === '/logo.svg') return serveAsset(res, 'logo.svg', 'image/svg+xml');
+    if (url.pathname === '/' || url.pathname === '/index.html') return serveAsset(res, 'index.html', 'text/html; charset=utf-8');
+    res.writeHead(404); res.end('Not found');
+  } catch (error) {
+    log('dashboard-request-error', { error: error.message });
+    if (res.headersSent) return res.destroy();
+    return jsonResponse(res, 500, { ok: false, error: 'Dashboard gagal memproses permintaan.' });
   }
-  if (url.pathname === '/logo.svg') return serveAsset(res, 'logo.svg', 'image/svg+xml');
-  if (url.pathname === '/' || url.pathname === '/index.html') return serveAsset(res, 'index.html', 'text/html; charset=utf-8');
-  res.writeHead(404); res.end('Not found');
 });
 dashboard.listen(DASHBOARD_PORT, '127.0.0.1', () => console.log('CEOAI Juwet dashboard http://127.0.0.1:' + DASHBOARD_PORT));
 const cleanerTimer = setInterval(() => {
@@ -399,7 +405,7 @@ function cleanHeaders(headers) {
   for (const key of ['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive', 'transfer-encoding']) delete result[key];
   return result;
 }
-function proxyRequest(req, res) {
+function proxyRequestImpl(req, res) {
   stats.requests++;
   recordClient(req, 'HTTP');
   let original;
@@ -539,6 +545,15 @@ function proxyRequest(req, res) {
     else res.destroy();
   });
   req.pipe(upstream);
+}
+function proxyRequest(req, res) {
+  try { return proxyRequestImpl(req, res); }
+  catch (error) {
+    log('proxy-handler-error', { error: error.message, url: String(req.url || '').slice(0, 300) });
+    if (res.headersSent) return res.destroy();
+    res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8', 'connection': 'close' });
+    res.end('CEOAI Juwet failed to process this request.');
+  }
 }
 const proxy = http.createServer(proxyRequest);
 const interceptedHttp = http.createServer(proxyRequest);
