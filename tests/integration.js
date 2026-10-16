@@ -187,7 +187,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     const corruptKey = crypto.createHash('sha256').update(corruptUrl).digest('hex');
     fs.writeFileSync(path.join(dataDir, 'cache', corruptKey + '.json'), JSON.stringify({
       statusCode: 200, expiresAt: Date.now() + 60000, body: Buffer.from('poisoned').toString('base64'),
-      headers: { 'x-corrupt': 'bad\\nheader' }
+      headers: { 'x-corrupt': 'bad\nheader' }
     }));
     const corruptMiss = await proxyGet(proxyPort, originPort, 'corrupt-cache');
     assert.strictEqual(corruptMiss.status, 200);
