@@ -406,9 +406,24 @@ const proxy = http.createServer(proxyRequest);
 proxy.on('connect', (req, client, head) => {
   stats.requests++;
   recordClient(req, 'CONNECT');
-  const split = req.url.lastIndexOf(':');
-  const host = normalizeHost(split >= 0 ? req.url.slice(0, split) : req.url);
-  const port = split >= 0 ? Number(req.url.slice(split + 1)) : 443;
+
+  // Parse CONNECT authority safely, including IPv6 literals and explicit ports.
+  let host = '';
+  let port = 443;
+  try {
+    const authority = new URL('http://' + String(req.url || ''));
+    host = normalizeHost(authority.hostname);
+    if (authority.username || authority.password || authority.pathname !== '/' || authority.search || authority.hash) {
+      throw new Error('invalid CONNECT authority');
+    }
+    if (authority.port) port = Number(authority.port);
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error('invalid CONNECT host or port');
+  } catch {
+    log('bad-connect-request', { authority: String(req.url || '').slice(0, 200) });
+    client.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    return;
+  }
+
   const decision = filterDecision(host);
   if (readJson(files.config, {}).cacheOnly === true) {
     stats.offlineMisses++;
@@ -419,19 +434,34 @@ proxy.on('connect', (req, client, head) => {
     stats.blocked++; log('blocked-connect', { host, reason: decision.reason });
     client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
   }
-  const upstream = net.connect(port, host, () => {
+
+  let tunnelEstablished = false;
+  const upstream = net.connect({ port, host });
+  const timeout = setTimeout(() => {
+    if (!tunnelEstablished) {
+      log('connect-timeout', { host, port, timeoutMs: 20000 });
+      if (!client.destroyed) client.end('HTTP/1.1 504 Gateway Timeout\r\nConnection: close\r\n\r\n');
+      upstream.destroy();
+    }
+  }, 20000);
+  upstream.once('connect', () => {
+    tunnelEstablished = true;
+    clearTimeout(timeout);
+    if (client.destroyed) return upstream.destroy();
     client.write('HTTP/1.1 200 Connection Established\r\nProxy-Agent: CEOAI-Juwet\r\n\r\n');
     if (head && head.length) upstream.write(head);
     upstream.pipe(client); client.pipe(upstream);
     log('HTTPS-TUNNEL', { host, port });
   });
-  upstream.setTimeout(20000, () => upstream.destroy(new Error('connect timeout')));
   upstream.on('error', error => {
-    log('connect-error', { host, error: error.message });
+    clearTimeout(timeout);
+    log('connect-error', { host, port, error: error.message });
     if (!client.destroyed) client.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
   });
+  upstream.on('close', () => clearTimeout(timeout));
   client.on('error', () => upstream.destroy());
-});
+  client.on('close', () => upstream.destroy());
+}););
 proxy.listen(PROXY_PORT, '0.0.0.0', () => console.log('CEOAI Juwet proxy listening on ' + PROXY_PORT));
 if (process.pkg && process.platform === 'win32' && process.env.CEOAI_OPEN_BROWSER !== '0') {
   const openTimer = setTimeout(() => {
