@@ -461,9 +461,9 @@ proxy.on('connect', (req, client, head) => {
     try { context = localCA.getContext(host); }
     catch (error) {
       log('tls-inspection-cert-error', { host, error: error.message });
-      client.end('HTTP/1.1 502 Bad Gateway\\r\\nConnection: close\\r\\n\\r\\n'); return;
+      client.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n'); return;
     }
-    client.write('HTTP/1.1 200 Connection Established\\r\\nProxy-Agent: CEOAI-Juwet\\r\\n\\r\\n');
+    client.write('HTTP/1.1 200 Connection Established\r\nProxy-Agent: CEOAI-Juwet\r\n\r\n');
     if (head && head.length) client.unshift(head);
     const secure = new tls.TLSSocket(client, {
       isServer: true, secureContext: context,
