@@ -219,6 +219,22 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(rewritten.headers['x-ceoai-cache'], 'HIT');
     assert.strictEqual(originCount, 12, 'rewrite rule should map URL onto cached object without another origin request');
 
+    const rangeRequest = await httpRequest({
+      host: '127.0.0.1', port: proxyPort,
+      path: 'http://127.0.0.1:' + originPort + '/cache-me',
+      headers: { host: '127.0.0.1:' + originPort, range: 'bytes=0-3' }
+    });
+    assert.strictEqual(rangeRequest.status, 200);
+    assert.strictEqual(rangeRequest.headers['x-ceoai-cache'], 'BYPASS', 'Range requests must not receive a cached full response');
+    const conditionalRequest = await httpRequest({
+      host: '127.0.0.1', port: proxyPort,
+      path: 'http://127.0.0.1:' + originPort + '/cache-me',
+      headers: { host: '127.0.0.1:' + originPort, 'if-none-match': '"client-etag"' }
+    });
+    assert.strictEqual(conditionalRequest.status, 200);
+    assert.strictEqual(conditionalRequest.headers['x-ceoai-cache'], 'BYPASS', 'conditional requests must reach upstream');
+    assert.strictEqual(originCount, 14, 'Range and conditional requests must reach upstream');
+
     const addBlock = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/blocked', method: 'POST',
       headers: { 'content-type': 'application/json' }
@@ -245,11 +261,12 @@ function testConnectTunnel(proxyPort, echoPort) {
       headers: { 'content-type': 'application/json' }
     }, JSON.stringify({ cacheOnly: true, autoCleanHours: 0 }));
     assert.strictEqual(offlineSettings.status, 200);
+    const originCountBeforeOffline = originCount;
     const offlineMiss = await proxyGet(proxyPort, originPort, 'offline-miss');
     assert.strictEqual(offlineMiss.status, 504);
     assert.strictEqual(offlineMiss.headers['x-ceoai-cache'], 'OFFLINE-MISS');
     await testConnectStatus(proxyPort, '127.0.0.1:' + echoPort, 504);
-    assert.strictEqual(originCount, 12, 'offline mode must not contact upstream');
+    assert.strictEqual(originCount, originCountBeforeOffline, 'offline mode must not contact upstream');
 
     await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/config', method: 'POST',
