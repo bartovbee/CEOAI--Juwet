@@ -175,6 +175,33 @@ function purgeAllCache() {
   }
   return removed;
 }
+const MAX_CACHE_TOTAL_BYTES = 512 * 1024 * 1024;
+function storeCacheObject(targetFile, value) {
+  const serialized = JSON.stringify(value);
+  const newBytes = Buffer.byteLength(serialized);
+  if (newBytes > MAX_CACHE_TOTAL_BYTES) return false;
+  const entries = [];
+  let totalBytes = 0, targetBytes = 0;
+  for (const name of fs.readdirSync(CACHE_DIR)) {
+    if (!name.endsWith('.json')) continue;
+    const file = path.join(CACHE_DIR, name);
+    try {
+      const stat = fs.statSync(file);
+      totalBytes += stat.size;
+      if (file === targetFile) targetBytes = stat.size;
+      else entries.push({ file, size: stat.size, mtime: stat.mtimeMs });
+    } catch {}
+  }
+  totalBytes -= targetBytes;
+  entries.sort((a, b) => a.mtime - b.mtime);
+  while (totalBytes + newBytes > MAX_CACHE_TOTAL_BYTES && entries.length) {
+    const oldest = entries.shift();
+    try { fs.unlinkSync(oldest.file); totalBytes -= oldest.size; } catch {}
+  }
+  if (totalBytes + newBytes > MAX_CACHE_TOTAL_BYTES) return false;
+  writeJson(targetFile, value);
+  return true;
+}
 function getCacheSummary() {
   let objects = 0, bytes = 0, expired = 0;
   for (const name of fs.readdirSync(CACHE_DIR)) {
@@ -481,10 +508,11 @@ function proxyRequest(req, res) {
         delete storedHeaders['keep-alive'];
         delete storedHeaders['content-length'];
         try {
-          fs.writeFileSync(cacheFile, JSON.stringify({
+          const stored = storeCacheObject(cacheFile, {
             statusCode: upstreamRes.statusCode, headers: storedHeaders,
             body: body.toString('base64'), expiresAt: Date.now() + ttl * 1000
-          }));
+          });
+          if (!stored) log('cache-capacity-bypass', { host, maxCacheBytes: MAX_CACHE_TOTAL_BYTES });
         } catch (error) { log('cache-write-error', { error: error.message }); }
       }
     });
