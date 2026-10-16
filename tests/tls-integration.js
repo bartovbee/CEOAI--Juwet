@@ -66,7 +66,7 @@ function interceptedGet(proxyPort, originPort, caPem) {
       const statusLine = responseHeader.slice(0, responseHeader.indexOf('\r\n'));
       if (!/^HTTP\/1\.1 200 /.test(statusLine)) return finish(new Error('CONNECT rejected: ' + statusLine));
       socket.removeAllListeners('data');
-      tlsSocket = tls.connect({ socket, ca: caPem, rejectUnauthorized: true, servername: undefined });
+      tlsSocket = tls.connect({ socket, ca: caPem, rejectUnauthorized: true, checkServerIdentity: (_host, cert) => tls.checkServerIdentity('127.0.0.1', cert) });
       tlsSocket.once('secureConnect', () => tlsSocket.write('GET /https-cache HTTP/1.1\r\nHost: 127.0.0.1:' + originPort + '\r\nConnection: close\r\n\r\n'));
       tlsSocket.on('data', chunk2 => {
         response = Buffer.concat([response, chunk2]);
