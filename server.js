@@ -75,7 +75,7 @@ function filterDecision(host) {
   const config = readJson(files.config, { filterMode: 'block' });
   const blocked = readJson(files.blocked, []);
   const allowed = readJson(files.allowed, []);
-  if (config.filterMode === 'allow' && allowed.length && !matchesHost(host, allowed)) {
+  if (config.filterMode === 'allow' && !matchesHost(host, allowed)) {
     return { blocked: true, reason: 'not-allowlisted' };
   }
   if (matchesHost(host, blocked)) return { blocked: true, reason: 'blocklist' };
@@ -173,9 +173,15 @@ function handleApi(req, res, pathname) {
           ...old,
           cacheEnabled: typeof input.cacheEnabled === 'boolean' ? input.cacheEnabled : old.cacheEnabled !== false,
           cacheOnly: typeof input.cacheOnly === 'boolean' ? input.cacheOnly : old.cacheOnly === true,
-          autoCleanHours: Math.max(0, Math.min(168, Number(input.autoCleanHours !== undefined ? input.autoCleanHours : (old.autoCleanHours === undefined ? 24 : old.autoCleanHours)))),
-          lastCacheCleanAt: Number(old.lastCacheCleanAt || Date.now()),
-          maxObjectBytes: Math.max(1024, Math.min(20000000, Number(input.maxObjectBytes || old.maxObjectBytes || 2000000))),
+          autoCleanHours: (() => {
+            const raw = input.autoCleanHours !== undefined ? Number(input.autoCleanHours) : Number(old.autoCleanHours === undefined ? 24 : old.autoCleanHours);
+            return Number.isFinite(raw) ? Math.max(0, Math.min(168, raw)) : 24;
+          })(),
+          lastCacheCleanAt: Number.isFinite(Number(old.lastCacheCleanAt)) && Number(old.lastCacheCleanAt) > 0 ? Number(old.lastCacheCleanAt) : Date.now(),
+          maxObjectBytes: (() => {
+            const raw = input.maxObjectBytes !== undefined ? Number(input.maxObjectBytes) : Number(old.maxObjectBytes === undefined ? 2000000 : old.maxObjectBytes);
+            return Number.isFinite(raw) ? Math.max(1024, Math.min(20000000, raw)) : 2000000;
+          })(),
           filterMode: input.filterMode === 'allow' ? 'allow' : 'block',
           tlsInspectionEnabled: typeof input.tlsInspectionEnabled === 'boolean' ? input.tlsInspectionEnabled : old.tlsInspectionEnabled === true,
           tlsInspectionPorts: Array.isArray(input.tlsInspectionPorts) ? [...new Set(input.tlsInspectionPorts.map(Number).filter(port => Number.isInteger(port) && port >= 1 && port <= 65535))].slice(0, 32) : (Array.isArray(old.tlsInspectionPorts) ? old.tlsInspectionPorts : [443])
