@@ -115,7 +115,11 @@ function interceptedGet(proxyPort, originPort, caPem) {
   let originCount = 0;
   const originPort = await new Promise((resolve, reject) => { origin.once('error', reject); origin.listen(0, '127.0.0.1', () => resolve(origin.address().port)); });
   const proxyPort = await freePort(), dashboardPort = await freePort();
-  const child = spawn(process.execPath, [path.join(root, 'server.js')], { cwd: root, env: { ...process.env, PROXY_PORT: String(proxyPort), DASHBOARD_PORT: String(dashboardPort), CEOAI_DATA_DIR: path.join(dataDir, 'appdata'), NODE_EXTRA_CA_CERTS: originCaPath }, stdio: 'ignore' });
+  const appEnv = { ...process.env, PROXY_PORT: String(proxyPort), DASHBOARD_PORT: String(dashboardPort), CEOAI_DATA_DIR: path.join(dataDir, 'appdata'), NODE_EXTRA_CA_CERTS: originCaPath, CEOAI_OPEN_BROWSER: '0' };
+  const testExecutable = process.env.CEOAI_TEST_EXECUTABLE;
+  const child = testExecutable
+    ? spawn(path.resolve(testExecutable), [], { cwd: root, env: appEnv, stdio: 'ignore' })
+    : spawn(process.execPath, [path.join(root, 'server.js')], { cwd: root, env: appEnv, stdio: 'ignore' });
   try {
     let ready = false;
     for (let i = 0; i < 80; i++) { try { if ((await request(dashboardPort, '/api/status')).status === 200) { ready = true; break; } } catch {} await new Promise(r => setTimeout(r, 125)); }
