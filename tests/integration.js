@@ -218,6 +218,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert(clientData.clients.some(client => client.ip === '127.0.0.1'), 'client monitor should track proxy source IP');
     assert(clientData.clients.find(client => client.ip === '127.0.0.1').requests >= 2, 'client monitor should count requests');
 
+    const originCountBeforeRewrite = originCount;
     const rewrite = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/rewrite', method: 'POST',
       headers: { 'content-type': 'application/json' }
@@ -226,8 +227,9 @@ function testConnectTunnel(proxyPort, echoPort) {
     const rewritten = await proxyGet(proxyPort, originPort, 'rewrite-me');
     assert.strictEqual(rewritten.status, 200);
     assert.strictEqual(rewritten.headers['x-ceoai-cache'], 'HIT');
-    assert.strictEqual(originCount, 12, 'rewrite rule should map URL onto cached object without another origin request');
+    assert.strictEqual(originCount, originCountBeforeRewrite, 'rewrite rule should map URL onto cached object without another origin request');
 
+    const originCountBeforeRangeAndConditional = originCount;
     const rangeRequest = await httpRequest({
       host: '127.0.0.1', port: proxyPort,
       path: 'http://127.0.0.1:' + originPort + '/cache-me',
@@ -242,7 +244,7 @@ function testConnectTunnel(proxyPort, echoPort) {
     });
     assert.strictEqual(conditionalRequest.status, 200);
     assert.strictEqual(conditionalRequest.headers['x-ceoai-cache'], 'BYPASS', 'conditional requests must reach upstream');
-    assert.strictEqual(originCount, 14, 'Range and conditional requests must reach upstream');
+    assert.strictEqual(originCount, originCountBeforeRangeAndConditional + 2, 'Range and conditional requests must reach upstream');
 
     const addBlock = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/blocked', method: 'POST',
