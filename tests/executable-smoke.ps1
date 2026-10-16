@@ -35,6 +35,15 @@ try {
     $client.EndConnect($connect)
   } finally { $client.Dispose() }
 
+  # Release the first Electron instance before the integration harness starts its own EXE.
+  # Electron's single-instance lock otherwise forwards/blocks the second test process.
+  if ($proc -and -not $proc.HasExited) {
+    Stop-Process -Id $proc.Id -Force
+    $proc.WaitForExit()
+  }
+  Get-Process -Name 'CEOAI Juwet' -ErrorAction SilentlyContinue | Stop-Process -Force
+  Start-Sleep -Milliseconds 750
+
   # Exercise real cache paths inside the packaged Windows EXE, not only its listener.
   Write-Host 'Starting packaged EXE HTTP and HTTPS cache regression tests...'
   $env:CEOAI_TEST_EXECUTABLE = $exe
