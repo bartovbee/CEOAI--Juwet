@@ -28,7 +28,13 @@ function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 function writeJson(file, value) {
-  fs.writeFileSync(file, JSON.stringify(value, null, 2));
+  const temp = file + '.tmp-' + process.pid + '-' + crypto.randomBytes(4).toString('hex');
+  try {
+    fs.writeFileSync(temp, JSON.stringify(value, null, 2), { flag: 'wx' });
+    fs.renameSync(temp, file);
+  } finally {
+    try { if (fs.existsSync(temp)) fs.unlinkSync(temp); } catch {}
+  }
 }
 if (!fs.existsSync(files.config)) writeJson(files.config, { cacheEnabled: true, cacheOnly: false, maxObjectBytes: 2000000, filterMode: 'block', autoCleanHours: 24, lastCacheCleanAt: Date.now(), tlsInspectionEnabled: false, tlsInspectionPorts: [443] });
 if (!fs.existsSync(files.blocked)) writeJson(files.blocked, []);
@@ -55,11 +61,28 @@ function recordClient(req, kind = 'HTTP') {
     if (oldest) clientStats.delete(oldest.ip);
   }
 }
+const MAX_LOG_BYTES = 5 * 1024 * 1024;
 function log(type, detail = {}) {
   const item = { time: new Date().toISOString(), type, ...detail };
   stats.recent.unshift(item);
   stats.recent = stats.recent.slice(0, 100);
-  fs.appendFile(files.log, JSON.stringify(item) + '\n', () => {});
+  const line = JSON.stringify(item) + '\n';
+  fs.stat(files.log, (statError, stat) => {
+    if (!statError && stat.size + Buffer.byteLength(line) > MAX_LOG_BYTES) {
+      const previous = files.log + '.1';
+      fs.unlink(previous, () => {
+        fs.rename(files.log, previous, renameError => {
+          if (renameError && renameError.code !== 'ENOENT') {
+            fs.writeFile(files.log, line, { flag: 'a' }, () => {});
+            return;
+          }
+          fs.writeFile(files.log, line, { flag: 'a' }, () => {});
+        });
+      });
+      return;
+    }
+    fs.appendFile(files.log, line, () => {});
+  });
 }
 function normalizeHost(value) {
   return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
@@ -73,8 +96,10 @@ function matchesHost(host, list) {
 }
 function filterDecision(host) {
   const config = readJson(files.config, { filterMode: 'block' });
-  const blocked = readJson(files.blocked, []);
-  const allowed = readJson(files.allowed, []);
+  const blockedRaw = readJson(files.blocked, []);
+  const allowedRaw = readJson(files.allowed, []);
+  const blocked = Array.isArray(blockedRaw) ? blockedRaw : [];
+  const allowed = Array.isArray(allowedRaw) ? allowedRaw : [];
   if (config.filterMode === 'allow' && !matchesHost(host, allowed)) {
     return { blocked: true, reason: 'not-allowlisted' };
   }
@@ -260,9 +285,7 @@ function handleApi(req, res, pathname) {
     return jsonResponse(res, 200, { ok: true, removed, cache: getCacheSummary() });
   }
   if (pathname === '/api/logs' && req.method === 'GET') {
-    let rows = [];
-    try { rows = fs.readFileSync(files.log, 'utf8').trim().split(/\r?\n/).filter(Boolean).slice(-200).reverse().map(JSON.parse); } catch {}
-    return jsonResponse(res, 200, rows);
+    return jsonResponse(res, 200, stats.recent.slice(0, 100));
   }
   return false;
 }
@@ -335,10 +358,11 @@ function proxyRequest(req, res) {
   const safeMethod = req.method === 'GET';
   const hasCredentials = Boolean(req.headers.authorization || req.headers.cookie);
   const requestCacheControl = String(req.headers['cache-control'] || '').toLowerCase();
-  const requestForcesRefresh = /(?:^|,)[ \t]*(?:no-cache|no-store|max-age[ \t]*=[ \t]*0)(?:[ \t]*(?:,|$))/.test(requestCacheControl) ||
+  const requestForcesRefresh = /(?:^|,)[ \t]*(?:no-cache(?:[ \t]*=[^,]*)?|no-store|max-age[ \t]*=[ \t]*0)(?:[ \t]*(?:,|$))/.test(requestCacheControl) ||
     String(req.headers.pragma || '').toLowerCase().includes('no-cache');
+  const hasRangeOrConditional = Boolean(req.headers.range || req.headers['if-range'] || req.headers['if-none-match'] || req.headers['if-modified-since'] || req.headers['if-match'] || req.headers['if-unmodified-since']);
   const httpsAuthorizedForCache = target.protocol !== 'https:' || req.socket.ceoaiTlsIntercepted === true;
-  const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && config.cacheEnabled !== false && httpsAuthorizedForCache;
+  const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && !hasRangeOrConditional && config.cacheEnabled !== false && httpsAuthorizedForCache;
   const key = cacheKey(target.href), cacheFile = path.join(CACHE_DIR, key + '.json');
   if (canCache) {
     try {
