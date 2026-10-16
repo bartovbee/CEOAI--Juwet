@@ -74,6 +74,19 @@ function createWindow() {
       message: 'Aplikasi gagal membuka jendela utama.', detail: error.message });
   });
 }
+process.on('ceoai-server-error', async detail => {
+  try {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'CEOAI Juwet - Port tidak tersedia',
+      message: 'CEOAI Juwet tidak dapat memulai layanan ' + detail.server + '.',
+      detail: 'Port: ' + detail.port + '\\nKode: ' + detail.code + '\\n' + detail.error + '\\n\\nTutup aplikasi lain yang memakai port tersebut, lalu jalankan CEOAI Juwet kembali.'
+    });
+  } finally {
+    isQuitting = true;
+    app.quit();
+  }
+});
 app.whenReady().then(() => {
   startLocalServer();
   makeTray();
