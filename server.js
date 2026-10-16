@@ -461,7 +461,7 @@ proxy.on('connect', (req, client, head) => {
   upstream.on('close', () => clearTimeout(timeout));
   client.on('error', () => upstream.destroy());
   client.on('close', () => upstream.destroy());
-}););
+});
 proxy.listen(PROXY_PORT, '0.0.0.0', () => console.log('CEOAI Juwet proxy listening on ' + PROXY_PORT));
 if (process.pkg && process.platform === 'win32' && process.env.CEOAI_OPEN_BROWSER !== '0') {
   const openTimer = setTimeout(() => {
