@@ -167,6 +167,11 @@ function testConnectTunnel(proxyPort, echoPort) {
     const health = await waitForDashboard(dashboardPort, child);
     assert.strictEqual(health.ok, true);
     assert.strictEqual(health.proxyPort, proxyPort);
+    const hostileHost = await httpRequest({
+      host: '127.0.0.1', port: dashboardPort, path: '/api/status',
+      headers: { host: 'attacker.example:' + dashboardPort }
+    });
+    assert.strictEqual(hostileHost.status, 403, 'dashboard must reject hostile Host headers');
     const index = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/' });
     assert.strictEqual(index.status, 200);
     assert(index.body.includes('CEOAI Juwet'));
