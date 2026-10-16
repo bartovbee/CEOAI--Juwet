@@ -355,7 +355,17 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(fs.existsSync(expiredPath), false);
     assert.strictEqual(fs.existsSync(malformedExpiryPath), false, 'malformed cache metadata must be cleaned');
 
+    const beforePlainTunnel = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/status' });
+    assert.strictEqual(beforePlainTunnel.status, 200);
+    const bypassBeforePlainTunnel = JSON.parse(beforePlainTunnel.body).stats.bypass;
     await testConnectTunnel(proxyPort, echoPort);
+    const afterPlainTunnel = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/status' });
+    assert.strictEqual(afterPlainTunnel.status, 200);
+    assert.strictEqual(
+      JSON.parse(afterPlainTunnel.body).stats.bypass,
+      bypassBeforePlainTunnel + 1,
+      'plain CONNECT TCP tunnels must bypass cache'
+    );
     // Repeat cache and tunnel behavior to catch intermittent state and socket regressions.
     for (let round = 1; round <= 25; round++) {
       const suffix = 'repeat-cache-' + round;
