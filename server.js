@@ -271,8 +271,9 @@ function handleApi(req, res, pathname) {
           tlsInspectionEnabled: typeof input.tlsInspectionEnabled === 'boolean' ? input.tlsInspectionEnabled : old.tlsInspectionEnabled === true,
           tlsInspectionPorts: Array.isArray(input.tlsInspectionPorts) ? [...new Set(input.tlsInspectionPorts.map(Number).filter(port => Number.isInteger(port) && port >= 1 && port <= 65535))].slice(0, 32) : (Array.isArray(old.tlsInspectionPorts) ? old.tlsInspectionPorts : [443])
         };
+        if (next.tlsInspectionEnabled === true) localCA.ensureCA();
         writeJson(files.config, next);
-        log('config-updated', { cacheEnabled: next.cacheEnabled, filterMode: next.filterMode });
+        log('config-updated', { cacheEnabled: next.cacheEnabled, filterMode: next.filterMode, tlsInspectionEnabled: next.tlsInspectionEnabled });
         jsonResponse(res, 200, { ok: true, config: next });
       } catch { jsonResponse(res, 400, { ok: false, error: 'JSON tidak valid' }); }
     });
