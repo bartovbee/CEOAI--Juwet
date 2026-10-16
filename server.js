@@ -84,6 +84,20 @@ function log(type, detail = {}) {
     fs.appendFile(files.log, line, () => {});
   });
 }
+try {
+  const stat = fs.statSync(files.log);
+  if (stat.size > 0) {
+    const fd = fs.openSync(files.log, 'r');
+    try {
+      const length = Math.min(stat.size, MAX_LOG_BYTES);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, Math.max(0, stat.size - length));
+      stats.recent = buffer.toString('utf8').split(/\r?\n/).filter(Boolean).slice(-100).reverse().flatMap(line => {
+        try { return [JSON.parse(line)]; } catch { return []; }
+      });
+    } finally { fs.closeSync(fd); }
+  }
+} catch {}
 function normalizeHost(value) {
   return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
 }
