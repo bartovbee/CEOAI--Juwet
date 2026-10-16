@@ -17,6 +17,9 @@ class LocalCertificateAuthority {
   ensureCA() {
     if (fs.existsSync(this.keyPath) && fs.existsSync(this.certPath)) return;
     fs.mkdirSync(this.dir, { recursive: true });
+    // If either CA file is missing, rotate the CA and discard host leaves signed by the previous CA.
+    for (const name of fs.readdirSync(this.leafDir)) { try { fs.unlinkSync(path.join(this.leafDir, name)); } catch {} }
+    this.contexts.clear();
     const keys = forge.pki.rsa.generateKeyPair(2048);
     const cert = forge.pki.createCertificate();
     cert.publicKey = keys.publicKey;
