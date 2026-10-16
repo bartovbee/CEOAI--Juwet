@@ -454,7 +454,14 @@ function applyRewrites(urlText) {
 }
 function cleanHeaders(headers) {
   const result = { ...headers };
-  for (const key of ['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive', 'transfer-encoding']) delete result[key];
+  const connectionTokens = String(headers.connection || '')
+    .split(',')
+    .map(value => value.trim().toLowerCase())
+    .filter(value => /^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(value));
+  for (const key of new Set([
+    'proxy-connection', 'proxy-authorization', 'connection', 'keep-alive',
+    'transfer-encoding', 'te', 'trailer', 'upgrade', ...connectionTokens
+  ])) delete result[key];
   return result;
 }
 function proxyRequestImpl(req, res) {
@@ -542,8 +549,7 @@ function proxyRequestImpl(req, res) {
   }
 
   const transport = target.protocol === 'https:' ? https : http;
-  const headers = { ...req.headers, host: target.host };
-  for (const keyName of ['proxy-connection', 'proxy-authorization', 'connection']) delete headers[keyName];
+  const headers = { ...cleanHeaders(req.headers), host: target.host };
   // A rewrite that changes origin must never forward origin-bound credentials.
   if (original.origin !== target.origin) {
     delete headers.authorization;
