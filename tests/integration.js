@@ -214,16 +214,18 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(receivedConnectionNominatedHeader, false, 'Connection-nominated request headers must not reach upstream');
     assert.strictEqual(hopByHop.headers['x-origin-hop'], undefined, 'Connection-nominated response headers must not reach clients');
 
+    const originCountBeforeCacheTest = originCount;
     const first = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(first.status, 200);
     assert.strictEqual(first.headers['x-ceoai-cache'], 'MISS');
-    assert.strictEqual(first.body, 'origin-response-1');
+    const cachedBody = first.body;
+    assert.strictEqual(originCount, originCountBeforeCacheTest + 1, 'cache MISS should request upstream once');
 
     const second = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(second.status, 200);
     assert.strictEqual(second.headers['x-ceoai-cache'], 'HIT');
-    assert.strictEqual(second.body, 'origin-response-1');
-    assert.strictEqual(originCount, 1, 'cache HIT should not request upstream again');
+    assert.strictEqual(second.body, cachedBody);
+    assert.strictEqual(originCount, originCountBeforeCacheTest + 1, 'cache HIT should not request upstream again');
 
     const forcedRefresh = await httpRequest({
       host: '127.0.0.1', port: proxyPort,
@@ -232,11 +234,11 @@ function testConnectTunnel(proxyPort, echoPort) {
     });
     assert.strictEqual(forcedRefresh.status, 200);
     assert.strictEqual(forcedRefresh.headers['x-ceoai-cache'], 'BYPASS');
-    assert.strictEqual(forcedRefresh.body, 'origin-response-2');
+    assert.strictEqual(forcedRefresh.body, 'origin-response-' + (originCountBeforeCacheTest + 2));
     const afterBypass = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(afterBypass.headers['x-ceoai-cache'], 'HIT');
-    assert.strictEqual(afterBypass.body, 'origin-response-1');
-    assert.strictEqual(originCount, 2, 'request no-cache must bypass cache and preserve existing object');
+    assert.strictEqual(afterBypass.body, cachedBody);
+    assert.strictEqual(originCount, originCountBeforeCacheTest + 2, 'request no-cache must bypass cache and preserve existing object');
 
     for (const pathName of ['private', 'no-store', 'no-cache', 'must-revalidate', 'no-cache-fields', 'pragma-no-cache', 'no-freshness']) {
       const before = originCount;
@@ -355,7 +357,17 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(fs.existsSync(expiredPath), false);
     assert.strictEqual(fs.existsSync(malformedExpiryPath), false, 'malformed cache metadata must be cleaned');
 
+    const beforePlainTunnel = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/status' });
+    assert.strictEqual(beforePlainTunnel.status, 200);
+    const bypassBeforePlainTunnel = JSON.parse(beforePlainTunnel.body).stats.bypass;
     await testConnectTunnel(proxyPort, echoPort);
+    const afterPlainTunnel = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/status' });
+    assert.strictEqual(afterPlainTunnel.status, 200);
+    assert.strictEqual(
+      JSON.parse(afterPlainTunnel.body).stats.bypass,
+      bypassBeforePlainTunnel + 1,
+      'plain CONNECT TCP tunnels must bypass cache'
+    );
     // Repeat cache and tunnel behavior to catch intermittent state and socket regressions.
     for (let round = 1; round <= 25; round++) {
       const suffix = 'repeat-cache-' + round;

@@ -123,8 +123,9 @@ function interceptedGet(proxyPort, originPort, caPem) {
     const initial = await request(dashboardPort, '/api/tls/status');
     assert.strictEqual(initial.status, 200);
     assert.strictEqual(JSON.parse(initial.body).enabled, false, 'TLS inspection must be disabled by default');
-    assert.strictEqual(JSON.parse(initial.body).ca.available, false, 'status polling must not create a CA while TLS inspection is disabled');
-    assert.strictEqual(fs.existsSync(path.join(dataDir, 'appdata', 'tls', 'ca-key.pem')), false, 'CA private key must not be created by status polling');
+    assert.strictEqual(JSON.parse(initial.body).ca.available, true, 'startup should provision a Root CA while TLS inspection is disabled');
+    assert.strictEqual(fs.existsSync(path.join(dataDir, 'appdata', 'tls', 'rootCA.key')), true, 'startup should create the Root CA private key');
+    assert.strictEqual(fs.existsSync(path.join(dataDir, 'appdata', 'tls', 'rootCA.pem')), true, 'startup should create the Root CA certificate');
     const ca = await request(dashboardPort, '/api/tls/ca.pem');
     assert.strictEqual(ca.status, 200);
     const config = await request(dashboardPort, '/api/config', 'POST', JSON.stringify({ tlsInspectionEnabled: true, tlsInspectionPorts: [originPort] }));
@@ -139,7 +140,7 @@ function interceptedGet(proxyPort, originPort, caPem) {
     assert.strictEqual(second.body, 'secure-origin-1');
     assert.strictEqual(originCount, 1, 'HTTPS HIT must not reach upstream');
 
-    const caCertPath = path.join(dataDir, 'appdata', 'tls', 'ca-cert.pem');
+    const caCertPath = path.join(dataDir, 'appdata', 'tls', 'rootCA.pem');
     fs.writeFileSync(caCertPath, 'corrupted-certificate');
     const repairedCa = await request(dashboardPort, '/api/tls/ca.pem');
     assert.strictEqual(repairedCa.status, 200, 'invalid persisted CA must be regenerated');
