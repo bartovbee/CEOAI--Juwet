@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const forge = require('node-forge');
+const { LocalCertificateAuthority } = require('../tls-inspection');
 
 function certPair(host) {
   const keys = forge.pki.rsa.generateKeyPair(2048);
@@ -91,6 +92,18 @@ function interceptedGet(proxyPort, originPort, caPem) {
 (async () => {
   const root = path.join(__dirname, '..');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ceoai-tls-test-'));
+  const recoveryDir = path.join(dataDir, 'ca-recovery');
+  const recoveryCA = new LocalCertificateAuthority(recoveryDir);
+  fs.mkdirSync(recoveryCA.dir, { recursive: true });
+  fs.writeFileSync(recoveryCA.keyPath, 'not-a-private-key');
+  fs.writeFileSync(recoveryCA.certPath, 'not-a-certificate');
+  fs.writeFileSync(path.join(recoveryCA.leafDir, 'stale-leaf.json'), '{"key":"stale","cert":"stale"}');
+  const recoveredPem = recoveryCA.getCertificatePem();
+  assert(recoveredPem.includes('BEGIN CERTIFICATE'), 'invalid local CA files should be regenerated');
+  assert.strictEqual(recoveryCA.getCertificateInfo().available, true, 'regenerated CA should be readable');
+  assert.strictEqual(fs.readdirSync(recoveryCA.leafDir).length, 0, 'old leaf certificates must be removed after CA rotation');
+  recoveryCA.getContext('localhost');
+
   const originCA = certPair('127.0.0.1');
   const originCaPath = path.join(dataDir, 'origin-ca.pem');
   fs.writeFileSync(originCaPath, originCA.ca);
