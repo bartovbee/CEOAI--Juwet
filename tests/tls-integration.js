@@ -119,6 +119,18 @@ function interceptedGet(proxyPort, originPort, caPem) {
   const leafSan = leafCert.extensions.find(extension => extension.name === 'subjectAltName');
   assert(leafSan && leafSan.altNames.some(name => name.type === 2 && name.value === 'localhost'), 'DNS leaf must contain matching DNS SAN');
 
+  // Corrupted persisted leaf material must be regenerated instead of breaking all future TLS requests.
+  fs.writeFileSync(leafPath, JSON.stringify({ key: 'corrupted-key', cert: 'corrupted-cert' }));
+  const leafRecoveryCA = new LocalCertificateAuthority(recoveryDir);
+  leafRecoveryCA.getContext('localhost');
+  const repairedLeaf = JSON.parse(fs.readFileSync(leafPath, 'utf8'));
+  const repairedLeafKey = forge.pki.privateKeyFromPem(repairedLeaf.key);
+  const repairedLeafCert = forge.pki.certificateFromPem(repairedLeaf.cert);
+  assert.strictEqual(repairedLeafKey.n.compareTo(repairedLeafCert.publicKey.n), 0, 'corrupted leaf key/certificate pair must be regenerated');
+  assert(repairedLeafCert.verify(recoveredCert), 'repaired leaf must be signed by the current Root CA');
+  const repairedSan = repairedLeafCert.extensions.find(extension => extension.name === 'subjectAltName');
+  assert(repairedSan && repairedSan.altNames.some(name => name.type === 2 && name.value === 'localhost'), 'repaired leaf must retain matching DNS SAN');
+
   recoveryCA.getContext('127.0.0.1');
   const ipLeafPath = path.join(recoveryCA.leafDir, require('crypto').createHash('sha256').update('127.0.0.1').digest('hex') + '.json');
   const ipLeaf = JSON.parse(fs.readFileSync(ipLeafPath, 'utf8'));
