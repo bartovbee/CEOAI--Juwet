@@ -40,5 +40,6 @@ jobs:
           path: |
             dist/CEOAI-Juwet.exe
             dist/CEOAI-Juwet-Source.zip
+            dist/PETUNJUK-CA-HTTPS.txt
           if-no-files-found: error
           retention-days: 30
