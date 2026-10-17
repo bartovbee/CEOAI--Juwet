@@ -53,8 +53,10 @@ class LocalCertificateAuthority {
           privateKey.n.compareTo(publicKey.n) === 0 && privateKey.e.compareTo(publicKey.e) === 0;
         const basicConstraints = certificate.extensions.find(extension => extension.name === 'basicConstraints');
         const keyUsage = certificate.extensions.find(extension => extension.name === 'keyUsage');
-        const isCA = Boolean(basicConstraints && basicConstraints.cA === true && basicConstraints.critical === true &&
-          keyUsage && keyUsage.keyCertSign === true && keyUsage.critical === true);
+        // Preserve valid legacy CAs: making extensions critical is good for newly generated roots,
+        // but requiring it here rotates an already trusted CA and breaks Chrome trust on existing installs.
+        const isCA = Boolean(basicConstraints && basicConstraints.cA === true &&
+          keyUsage && keyUsage.keyCertSign === true);
         const isSelfSigned = certificate.verify(certificate);
         const now = new Date();
         const isCurrentlyValid = certificate.validity.notBefore <= now && certificate.validity.notAfter > now;
