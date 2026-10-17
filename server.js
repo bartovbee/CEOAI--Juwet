@@ -46,7 +46,7 @@ if (!fs.existsSync(files.allowed)) writeJson(files.allowed, []);
 if (!fs.existsSync(files.rewrites)) writeJson(files.rewrites, []);
 
 const stats = {
-  requests: 0, hits: 0, misses: 0, bypass: 0, blocked: 0,
+  requests: 0, hits: 0, misses: 0, bypass: 0, blocked: 0, missBypass: 0, missWriteErrors: 0,
   bytesIn: 0, bytesOut: 0, offlineMisses: 0, startedAt: new Date().toISOString(), recent: []
 };
 const clientStats = new Map();
@@ -578,11 +578,15 @@ function proxyRequestImpl(req, res) {
     const responseHeaders = cleanHeaders(upstreamRes.headers);
     const rawMaxBytes = Number(config.maxObjectBytes);
     const maxBytes = Number.isFinite(rawMaxBytes) ? Math.max(1024, Math.min(20000000, rawMaxBytes)) : 2000000;
+    const upstreamCacheControl = String(upstreamRes.headers['cache-control'] || '').toLowerCase();
+    const upstreamDirectives = upstreamCacheControl.split(',').map(value => value.trim().split('=')[0].trim());
+    const cachePolicyReason = upstreamRes.headers['set-cookie'] ? 'set-cookie' :
+      upstreamRes.headers.vary ? 'vary' :
+      upstreamDirectives.includes('no-store') ? 'cache-control-no-store' :
+      upstreamDirectives.includes('private') ? 'cache-control-private' : null;
     const cacheHeadersAllowed = canCache &&
       upstreamRes.statusCode === 200 &&
-      !upstreamRes.headers['set-cookie'] &&
-      !/private|no-store/i.test(upstreamRes.headers['cache-control'] || '') &&
-      !upstreamRes.headers.vary;
+      cachePolicyReason === null;
     let size = 0, tooLarge = false;
     const chunks = [];
     upstreamRes.on('data', chunk => {
@@ -594,7 +598,6 @@ function proxyRequestImpl(req, res) {
       }
     });
     upstreamRes.on('end', () => {
-      log(canCache ? 'MISS' : 'BYPASS', { host, url: target.origin + target.pathname, statusCode: upstreamRes.statusCode, bytes: size });
       const cacheControl = String(upstreamRes.headers['cache-control'] || '');
       const directives = cacheControl.toLowerCase().split(',').map(value => value.trim());
       const match = cacheControl.match(/(?:^|,)[ \t]*max-age[ \t]*=[ \t]*([0-9]+)/i);
@@ -626,11 +629,27 @@ function proxyRequestImpl(req, res) {
             statusCode: upstreamRes.statusCode, headers: storedHeaders,
             body: body.toString('base64'), expiresAt: Date.now() + ttl * 1000
           });
-          if (!stored) log('cache-capacity-bypass', { host, maxCacheBytes: MAX_CACHE_TOTAL_BYTES });
-        } catch (error) { log('cache-write-error', { error: error.message }); }
+          if (!stored) {
+            stats.missBypass++;
+            log('MISS_BYPASS', { host, url: target.origin + target.pathname, reason: 'cache-capacity', maxCacheBytes: MAX_CACHE_TOTAL_BYTES });
+          } else {
+            log('MISS_STORED', { host, url: target.origin + target.pathname, statusCode: upstreamRes.statusCode, bytes: size });
+          }
+        } catch (error) {
+          stats.missWriteErrors++;
+          log('MISS_WRITE_ERROR', { host, url: target.origin + target.pathname, code: error.code || 'CACHE_WRITE_FAILED', error: error.message });
+        }
+      } else if (canCache && cachePolicyReason) {
+        stats.missBypass++;
+        log('MISS_BYPASS', { host, url: target.origin + target.pathname, reason: cachePolicyReason, statusCode: upstreamRes.statusCode });
+      } else {
+        log(canCache ? 'MISS_NOT_STORED' : 'BYPASS', { host, url: target.origin + target.pathname, statusCode: upstreamRes.statusCode, bytes: size, reason: tooLarge ? 'object-too-large' : 'cache-policy-or-freshness' });
       }
+      // MISS_WRITE_ERROR is surfaced in /api/status stats + recent events. The response is streamed,
+      // so a disk error discovered at end-of-stream cannot safely rewrite an already-sent header.
     });
-    res.writeHead(upstreamRes.statusCode || 502, { ...responseHeaders, 'x-ceoai-cache': canCache ? 'MISS' : 'BYPASS' });
+    const responseCacheStatus = !canCache ? 'BYPASS' : (cachePolicyReason ? 'MISS_BYPASS' : 'MISS');
+    res.writeHead(upstreamRes.statusCode || 502, { ...responseHeaders, 'x-ceoai-cache': responseCacheStatus });
     upstreamRes.pipe(res);
     res.on('finish', () => { stats.bytesOut += size; });
   });
