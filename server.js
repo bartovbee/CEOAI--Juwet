@@ -724,9 +724,20 @@ proxy.on('connect', (req, client, head) => {
     const secure = new tls.TLSSocket(client, { isServer: true, secureContext: context });
     secure.ceoaiInterceptHost = (host.includes(':') ? '[' + host + ']' : host) + (port === 443 ? '' : ':' + port);
     secure.ceoaiTlsIntercepted = true;
-    secure.on('error', error => log('tls-inspection-client-error', { host, error: error.message }));
+    secure.on('error', error => {
+      // Never silently downgrade a failed TLS interception to a raw TCP tunnel.
+      log('HTTPS_DECRYPTION_FAILED', {
+        host, port, phase: 'client-tls', code: error.code || 'TLS_HANDSHAKE_FAILED', error: error.message
+      });
+    });
     secure.on('secure', () => {
-      log('TLS-INSPECTED', { host, port });
+      const sniHost = normalizeHost(secure.servername || '');
+      if (sniHost && sniHost !== host) {
+        log('HTTPS_DECRYPTION_FAILED', { host, port, phase: 'sni-mismatch', sniHost, error: 'Client SNI does not match CONNECT authority' });
+        secure.destroy(new Error('TLS SNI does not match CONNECT authority'));
+        return;
+      }
+      log('TLS-INSPECTED', { host, port, sniHost: sniHost || null });
       interceptedHttp.emit('connection', secure);
     });
     client.on('close', () => secure.destroy());
