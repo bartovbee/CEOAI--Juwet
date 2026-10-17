@@ -3,13 +3,42 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const tls = require('tls');
+const { execSync } = require('child_process');
 const forge = require('node-forge');
+
+function hardenWindowsPrivateFile(filePath) {
+  if (process.platform !== 'win32') return;
+
+  let username = String(process.env.USERNAME || '').trim();
+  // Service runners may expose USERNAME=SYSTEM or no USERNAME at all.
+  // Resolve the actual security principal rather than passing an empty variable to icacls.
+  if (!username || /^SYSTEM$/i.test(username)) {
+    username = execSync('whoami', {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim();
+  } else if (process.env.USERDOMAIN) {
+    username = String(process.env.USERDOMAIN).trim() + '\\' + username;
+  }
+
+  if (!username || /[\r\n"]/g.test(username)) {
+    throw new Error('Unable to resolve a safe Windows account name for CA private-key ACL.');
+  }
+
+  const safePath = String(filePath).replace(/"/g, '""');
+  const safeUser = username.replace(/"/g, '""');
+  execSync('icacls "' + safePath + '" /inheritance:r /grant:r "' + safeUser + ':(R,W)"', {
+    windowsHide: true,
+    stdio: 'pipe'
+  });
+}
 
 class LocalCertificateAuthority {
   constructor(dataDir) {
     this.dir = path.join(dataDir, 'tls');
-    this.keyPath = path.join(this.dir, 'ca-key.pem');
-    this.certPath = path.join(this.dir, 'ca-cert.pem');
+    this.keyPath = path.join(this.dir, 'rootCA.key');
+    this.certPath = path.join(this.dir, 'rootCA.pem');
     this.leafDir = path.join(this.dir, 'hosts');
     this.contexts = new Map();
     fs.mkdirSync(this.leafDir, { recursive: true });
@@ -26,7 +55,10 @@ class LocalCertificateAuthority {
         const isSelfSigned = certificate.verify(certificate);
         const now = new Date();
         const isCurrentlyValid = certificate.validity.notBefore <= now && certificate.validity.notAfter > now;
-        if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) return;
+        if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) {
+          hardenWindowsPrivateFile(this.keyPath);
+          return;
+        }
       } catch {}
       // Invalid, expired, or mismatched CA files cannot be trusted; rotate and clear leaves.
     }
@@ -49,6 +81,7 @@ class LocalCertificateAuthority {
     ]);
     cert.sign(keys.privateKey, forge.md.sha256.create());
     fs.writeFileSync(this.keyPath, forge.pki.privateKeyToPem(keys.privateKey), { mode: 0o600 });
+    hardenWindowsPrivateFile(this.keyPath);
     fs.writeFileSync(this.certPath, forge.pki.certificateToPem(cert), { mode: 0o644 });
     this.contexts.clear();
   }
@@ -62,6 +95,7 @@ class LocalCertificateAuthority {
     this.ensureCA();
     if (this.contexts.has(host)) return this.contexts.get(host);
     const leafKeyPath = path.join(this.leafDir, crypto.createHash('sha256').update(host).digest('hex') + '.json');
+    if (fs.existsSync(leafKeyPath)) hardenWindowsPrivateFile(leafKeyPath);
     let leaf;
     try { leaf = JSON.parse(fs.readFileSync(leafKeyPath, 'utf8')); } catch {}
     if (!leaf) {
@@ -85,13 +119,14 @@ class LocalCertificateAuthority {
       cert.sign(caKey, forge.md.sha256.create());
       leaf = { key: forge.pki.privateKeyToPem(keys.privateKey), cert: forge.pki.certificateToPem(cert) };
       fs.writeFileSync(leafKeyPath, JSON.stringify(leaf), { mode: 0o600 });
+      hardenWindowsPrivateFile(leafKeyPath);
     }
     const context = tls.createSecureContext({ key: leaf.key, cert: leaf.cert });
     this.contexts.set(host, context);
     return context;
   }
   getCertificateInfo() {
-    // Status polling must not create a CA/private key while TLS inspection is disabled.
+    // Report the persisted local CA without changing key material.
     if (!fs.existsSync(this.keyPath) || !fs.existsSync(this.certPath)) {
       return { available: false, error: 'CA belum dibuat; unduh sertifikat atau aktifkan inspeksi TLS untuk membuat CA lokal.' };
     }
