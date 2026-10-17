@@ -127,7 +127,7 @@ function interceptedGet(proxyPort, originPort, caPem) {
   const repairedLeafKey = forge.pki.privateKeyFromPem(repairedLeaf.key);
   const repairedLeafCert = forge.pki.certificateFromPem(repairedLeaf.cert);
   assert.strictEqual(repairedLeafKey.n.compareTo(repairedLeafCert.publicKey.n), 0, 'corrupted leaf key/certificate pair must be regenerated');
-  assert(repairedLeafCert.verify(recoveredCert), 'repaired leaf must be signed by the current Root CA');
+  assert(recoveredCert.verify(repairedLeafCert), 'repaired leaf must be signed by the current Root CA');
   const repairedSan = repairedLeafCert.extensions.find(extension => extension.name === 'subjectAltName');
   assert(repairedSan && repairedSan.altNames.some(name => name.type === 2 && name.value === 'localhost'), 'repaired leaf must retain matching DNS SAN');
 
