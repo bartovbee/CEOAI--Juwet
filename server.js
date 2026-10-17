@@ -151,6 +151,28 @@ function filterDecision(host) {
 function cacheKey(url) {
   return crypto.createHash('sha256').update(url).digest('hex');
 }
+function cacheFiles() {
+  const files = [];
+  function walk(dir) {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(fullPath);
+      else if (entry.isFile() && entry.name.endsWith('.json')) files.push(fullPath);
+    }
+  }
+  walk(CACHE_DIR);
+  return files;
+}
+function cacheFileForUrl(url) {
+  const target = new URL(url);
+  // Keep one human-readable folder per hostname, with a hash per URL inside it.
+  const hostname = normalizeHost(target.hostname).replace(/[^a-z0-9._-]/g, '_') || 'unknown-host';
+  const hostDir = path.join(CACHE_DIR, hostname);
+  fs.mkdirSync(hostDir, { recursive: true });
+  return path.join(hostDir, cacheKey(target.href) + '.json');
+}
 function jsonResponse(res, status, value) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(value));
@@ -168,9 +190,7 @@ function serveAsset(res, name, contentType) {
 }
 function cleanExpiredCache() {
   let removed = 0;
-  for (const name of fs.readdirSync(CACHE_DIR)) {
-    if (!name.endsWith('.json')) continue;
-    const file = path.join(CACHE_DIR, name);
+  for (const file of cacheFiles()) {
     let expired = false;
     try {
       const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -183,8 +203,8 @@ function cleanExpiredCache() {
 }
 function purgeAllCache() {
   let removed = 0;
-  for (const name of fs.readdirSync(CACHE_DIR)) {
-    if (name.endsWith('.json')) try { fs.unlinkSync(path.join(CACHE_DIR, name)); removed++; } catch {}
+  for (const file of cacheFiles()) {
+    try { fs.unlinkSync(file); removed++; } catch {}
   }
   return removed;
 }
@@ -196,9 +216,7 @@ function storeCacheObject(targetFile, value) {
   if (newBytes > MAX_CACHE_TOTAL_BYTES) return false;
   const entries = [];
   let totalBytes = 0, targetBytes = 0;
-  for (const name of fs.readdirSync(CACHE_DIR)) {
-    if (!name.endsWith('.json')) continue;
-    const file = path.join(CACHE_DIR, name);
+  for (const file of cacheFiles()) {
     try {
       const stat = fs.statSync(file);
       totalBytes += stat.size;
@@ -517,7 +535,7 @@ function proxyRequestImpl(req, res) {
   const hasRangeOrConditional = Boolean(req.headers.range || req.headers['if-range'] || req.headers['if-none-match'] || req.headers['if-modified-since'] || req.headers['if-match'] || req.headers['if-unmodified-since']);
   const httpsAuthorizedForCache = target.protocol !== 'https:' || req.socket.ceoaiTlsIntercepted === true;
   const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && !hasRangeOrConditional && config.cacheEnabled !== false && httpsAuthorizedForCache;
-  const key = cacheKey(target.href), cacheFile = path.join(CACHE_DIR, key + '.json');
+  const cacheFile = cacheFileForUrl(target.href);
   if (canCache) {
     try {
       const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
