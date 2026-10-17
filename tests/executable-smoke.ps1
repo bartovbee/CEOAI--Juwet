@@ -35,7 +35,28 @@ try {
     $client.EndConnect($connect)
   } finally { $client.Dispose() }
 
-  Write-Host 'Packaged EXE smoke tests passed: dashboard API, embedded HTML/logo assets, and proxy listener.'
+  # Release the first Electron instance before the integration harness starts its own EXE.
+  # Electron's single-instance lock otherwise forwards/blocks the second test process.
+  if ($proc -and -not $proc.HasExited) {
+    Stop-Process -Id $proc.Id -Force
+    $proc.WaitForExit()
+  }
+  Get-Process -Name 'CEOAI Juwet' -ErrorAction SilentlyContinue | Stop-Process -Force
+  Start-Sleep -Milliseconds 750
+
+  # Exercise the packaged Electron app directly for repeatable integration launches.
+  # The portable NSIS wrapper can outlive its launcher process and interfere with a second spawn.
+  $integrationExe = Join-Path (Get-Location) 'dist\win-unpacked\CEOAI Juwet.exe'
+  if (-not (Test-Path $integrationExe)) { throw "Packaged app executable not found: $integrationExe" }
+  Write-Host 'Starting packaged app HTTP and HTTPS cache regression tests...'
+  $env:CEOAI_TEST_EXECUTABLE = $integrationExe
+  node tests/integration.js
+  if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE HTTP cache integration failed' }
+  node tests/tls-integration.js
+  if ($LASTEXITCODE -ne 0) { throw 'Packaged EXE HTTPS TLS-inspection/cache integration failed' }
+  Remove-Item Env:CEOAI_TEST_EXECUTABLE -ErrorAction SilentlyContinue
+
+  Write-Host 'Packaged EXE verified: dashboard, HTTP MISS/HIT, HTTPS TLS-inspection MISS/HIT, upstream request counts, and CA recovery.'
 } finally {
   if ($proc -and -not $proc.HasExited) {
     Stop-Process -Id $proc.Id -Force
