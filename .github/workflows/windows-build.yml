@@ -8,8 +8,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ceoai-juwet-build
-  cancel-in-progress: true
+  # Push and pull_request events can fire for the same commit. Keep builds
+  # isolated by ref and queue same-ref builds instead of cancelling validation.
+  group: ceoai-juwet-build-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: windows-latest
