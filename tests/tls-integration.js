@@ -108,6 +108,10 @@ function interceptedGet(proxyPort, originPort, caPem) {
   assert.strictEqual(recoveredKey.n.bitLength(), 2048, 'local Root CA private key must be RSA 2048-bit');
   assert.strictEqual(recoveredCert.publicKey.n.bitLength(), 2048, 'local Root CA public key must be RSA 2048-bit');
   assert.strictEqual(recoveredCert.signatureOid, forge.pki.oids.sha256WithRSAEncryption, 'local Root CA must use SHA-256 with RSA');
+  const rootBasicConstraints = recoveredCert.extensions.find(extension => extension.name === 'basicConstraints');
+  const rootKeyUsage = recoveredCert.extensions.find(extension => extension.name === 'keyUsage');
+  assert(rootBasicConstraints && rootBasicConstraints.critical === true && rootBasicConstraints.cA === true, 'Root CA basicConstraints must be critical and identify a CA');
+  assert(rootKeyUsage && rootKeyUsage.critical === true && rootKeyUsage.keyCertSign === true, 'Root CA keyUsage must be critical and permit certificate signing');
 
   const leafPath = path.join(recoveryCA.leafDir, require('crypto').createHash('sha256').update('localhost').digest('hex') + '.json');
   const leaf = JSON.parse(fs.readFileSync(leafPath, 'utf8'));
