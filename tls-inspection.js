@@ -3,7 +3,19 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const tls = require('tls');
+const { execSync } = require('child_process');
 const forge = require('node-forge');
+
+function hardenWindowsPrivateFile(filePath) {
+  if (process.platform !== 'win32') return;
+  // Remove inherited ACLs, then grant read/write only to the current Windows user.
+  // The path is quoted and embedded quotes are doubled for cmd.exe.
+  const safePath = String(filePath).replace(/"/g, '""');
+  execSync('icacls "' + safePath + '" /inheritance:r /grant:r "%USERNAME%:(R,W)"', {
+    windowsHide: true,
+    stdio: 'pipe'
+  });
+}
 
 class LocalCertificateAuthority {
   constructor(dataDir) {
@@ -26,7 +38,10 @@ class LocalCertificateAuthority {
         const isSelfSigned = certificate.verify(certificate);
         const now = new Date();
         const isCurrentlyValid = certificate.validity.notBefore <= now && certificate.validity.notAfter > now;
-        if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) return;
+        if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) {
+          hardenWindowsPrivateFile(this.keyPath);
+          return;
+        }
       } catch {}
       // Invalid, expired, or mismatched CA files cannot be trusted; rotate and clear leaves.
     }
@@ -49,6 +64,7 @@ class LocalCertificateAuthority {
     ]);
     cert.sign(keys.privateKey, forge.md.sha256.create());
     fs.writeFileSync(this.keyPath, forge.pki.privateKeyToPem(keys.privateKey), { mode: 0o600 });
+    hardenWindowsPrivateFile(this.keyPath);
     fs.writeFileSync(this.certPath, forge.pki.certificateToPem(cert), { mode: 0o644 });
     this.contexts.clear();
   }
@@ -85,6 +101,7 @@ class LocalCertificateAuthority {
       cert.sign(caKey, forge.md.sha256.create());
       leaf = { key: forge.pki.privateKeyToPem(keys.privateKey), cert: forge.pki.certificateToPem(cert) };
       fs.writeFileSync(leafKeyPath, JSON.stringify(leaf), { mode: 0o600 });
+      hardenWindowsPrivateFile(leafKeyPath);
     }
     const context = tls.createSecureContext({ key: leaf.key, cert: leaf.cert });
     this.contexts.set(host, context);
