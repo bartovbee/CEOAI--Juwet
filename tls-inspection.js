@@ -144,6 +144,8 @@ class LocalCertificateAuthority {
       try {
         fs.writeFileSync(tempPath, JSON.stringify(leaf), { flag: 'wx', mode: 0o600 });
         hardenWindowsPrivateFile(tempPath);
+        // Windows rename does not replace an existing destination file.
+        try { fs.unlinkSync(leafKeyPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
         fs.renameSync(tempPath, leafKeyPath);
       } finally {
         try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
