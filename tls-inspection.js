@@ -96,11 +96,33 @@ class LocalCertificateAuthority {
     if (this.contexts.has(host)) return this.contexts.get(host);
     const leafKeyPath = path.join(this.leafDir, crypto.createHash('sha256').update(host).digest('hex') + '.json');
     if (fs.existsSync(leafKeyPath)) hardenWindowsPrivateFile(leafKeyPath);
+    const caKey = forge.pki.privateKeyFromPem(fs.readFileSync(this.keyPath, 'utf8'));
+    const caCert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
     let leaf;
     try { leaf = JSON.parse(fs.readFileSync(leafKeyPath, 'utf8')); } catch {}
-    if (!leaf) {
-      const caKey = forge.pki.privateKeyFromPem(fs.readFileSync(this.keyPath, 'utf8'));
-      const caCert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
+
+    // Validate persisted leaf material before reusing it. A truncated file, mismatched
+    // key/certificate, expired certificate, wrong SAN, or leaf signed by an old CA
+    // must not turn every later HTTPS request into a permanent TLS failure.
+    let leafValid = false;
+    if (leaf && typeof leaf.key === 'string' && typeof leaf.cert === 'string') {
+      try {
+        const leafKey = forge.pki.privateKeyFromPem(leaf.key);
+        const leafCert = forge.pki.certificateFromPem(leaf.cert);
+        const pairMatches = leafKey.n && leafKey.e && leafCert.publicKey.n && leafCert.publicKey.e &&
+          leafKey.n.compareTo(leafCert.publicKey.n) === 0 && leafKey.e.compareTo(leafCert.publicKey.e) === 0;
+        const now = new Date();
+        const isCurrentlyValid = leafCert.validity.notBefore <= now && leafCert.validity.notAfter > now;
+        const san = leafCert.extensions.find(extension => extension.name === 'subjectAltName');
+        const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
+        const hasMatchingSan = Boolean(san && san.altNames.some(name =>
+          isIp ? name.type === 7 && String(name.ip).toLowerCase() === host :
+            name.type === 2 && String(name.value).toLowerCase() === host));
+        leafValid = Boolean(pairMatches && isCurrentlyValid && hasMatchingSan && leafCert.verify(caCert));
+      } catch {}
+    }
+
+    if (!leafValid) {
       const keys = forge.pki.rsa.generateKeyPair(2048);
       const cert = forge.pki.createCertificate();
       cert.publicKey = keys.publicKey;
@@ -118,7 +140,14 @@ class LocalCertificateAuthority {
       ]);
       cert.sign(caKey, forge.md.sha256.create());
       leaf = { key: forge.pki.privateKeyToPem(keys.privateKey), cert: forge.pki.certificateToPem(cert) };
-      fs.writeFileSync(leafKeyPath, JSON.stringify(leaf), { mode: 0o600 });
+      const tempPath = leafKeyPath + '.tmp-' + process.pid + '-' + crypto.randomBytes(4).toString('hex');
+      try {
+        fs.writeFileSync(tempPath, JSON.stringify(leaf), { flag: 'wx', mode: 0o600 });
+        hardenWindowsPrivateFile(tempPath);
+        fs.renameSync(tempPath, leafKeyPath);
+      } finally {
+        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+      }
       hardenWindowsPrivateFile(leafKeyPath);
     }
     const context = tls.createSecureContext({ key: leaf.key, cert: leaf.cert });
