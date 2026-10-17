@@ -145,7 +145,9 @@ function testConnectTunnel(proxyPort, echoPort) {
       'must-revalidate': 'public, max-age=60, must-revalidate',
       'no-cache-fields': 'public, max-age=60, no-cache="set-cookie"',
       'pragma-no-cache': 'public, max-age=60',
-      'no-freshness': ''
+      'no-freshness': '',
+      'vary-response': 'public, max-age=60',
+      'set-cookie-response': 'public, max-age=60'
     };
     const policy = policies[req.url.slice(1)];
     const headers = { 'content-type': 'text/plain' };
@@ -153,6 +155,8 @@ function testConnectTunnel(proxyPort, echoPort) {
       headers.connection = 'x-origin-hop';
       headers['x-origin-hop'] = 'must-not-cross-proxy';
     }
+    if (req.url === '/vary-response') headers.vary = 'Accept-Encoding';
+    if (req.url === '/set-cookie-response') headers['set-cookie'] = 'session=secret; HttpOnly';
     if (policy !== undefined) {
       if (policy) headers['cache-control'] = policy;
     } else {
@@ -240,11 +244,20 @@ function testConnectTunnel(proxyPort, echoPort) {
     assert.strictEqual(afterBypass.body, cachedBody);
     assert.strictEqual(originCount, originCountBeforeCacheTest + 2, 'request no-cache must bypass cache and preserve existing object');
 
-    for (const pathName of ['private', 'no-store', 'no-cache', 'must-revalidate', 'no-cache-fields', 'pragma-no-cache', 'no-freshness']) {
+    for (const pathName of ['private', 'no-store', 'vary-response', 'set-cookie-response']) {
       const before = originCount;
       const firstPolicyRequest = await proxyGet(proxyPort, originPort, pathName);
       assert.strictEqual(firstPolicyRequest.status, 200, pathName + ' first request should succeed');
-      assert.strictEqual(firstPolicyRequest.headers['x-ceoai-cache'], 'MISS');
+      assert.strictEqual(firstPolicyRequest.headers['x-ceoai-cache'], 'MISS_BYPASS', pathName + ' should expose policy bypass');
+      const secondPolicyRequest = await proxyGet(proxyPort, originPort, pathName);
+      assert.strictEqual(secondPolicyRequest.status, 200, pathName + ' second request should succeed');
+      assert.strictEqual(secondPolicyRequest.headers['x-ceoai-cache'], 'MISS_BYPASS', pathName + ' response must not be stored');
+      assert.strictEqual(originCount, before + 2, pathName + ' should reach origin for both requests');
+    }
+    for (const pathName of ['no-cache', 'must-revalidate', 'no-cache-fields', 'pragma-no-cache', 'no-freshness']) {
+      const before = originCount;
+      const firstPolicyRequest = await proxyGet(proxyPort, originPort, pathName);
+      assert.strictEqual(firstPolicyRequest.status, 200, pathName + ' first request should succeed');
       const secondPolicyRequest = await proxyGet(proxyPort, originPort, pathName);
       assert.strictEqual(secondPolicyRequest.status, 200, pathName + ' second request should succeed');
       assert.strictEqual(secondPolicyRequest.headers['x-ceoai-cache'], 'MISS', pathName + ' response must not be stored');
