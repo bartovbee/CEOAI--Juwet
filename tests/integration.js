@@ -5,7 +5,7 @@ const http = require('http');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function freePort() {
@@ -54,6 +54,41 @@ function proxyGet(proxyPort, originPort, suffix) {
     path: 'http://127.0.0.1:' + originPort + '/' + suffix,
     headers: { host: '127.0.0.1:' + originPort }
   });
+}
+function testPublicHttpsCache(proxyPort, dashboardPort) {
+  // Opt-in only: external DNS/network/service availability must not make normal CI flaky.
+  if (process.platform !== 'win32' || process.env.CEOAI_PUBLIC_HTTPS_TEST !== '1') return;
+  const configBody = JSON.stringify({ tlsInspectionEnabled: true, tlsInspectionPorts: [443], cacheEnabled: true, cacheOnly: false });
+  const config = execFileSync('curl.exe', [
+    '--silent', '--show-error', '--max-time', '10',
+    '--request', 'POST',
+    '--header', 'content-type: application/json',
+    '--data', configBody,
+    'http://127.0.0.1:' + dashboardPort + '/api/config'
+  ], { encoding: 'utf8', windowsHide: true });
+  assert(JSON.parse(config).ok, 'TLS inspection should enable for public HTTPS test');
+
+  // /cache without a duration commonly returns max-age=0 and is intentionally not reusable.
+  // Use /cache/60 so the origin explicitly grants a 60-second freshness lifetime.
+  const url = 'https://httpbin.org/cache/60?ceoai_probe=' + crypto.randomBytes(8).toString('hex');
+  function curlOnce() {
+    return execFileSync('curl.exe', [
+      '--silent', '--show-error', '--insecure', '--max-time', '30',
+      '--proxy', 'http://127.0.0.1:' + proxyPort,
+      '--dump-header', '-', '--output', 'NUL',
+      '--write-out', '\n__CEOAI_HTTP_CODE__:%{http_code}\n',
+      url
+    ], { encoding: 'utf8', windowsHide: true, maxBuffer: 2 * 1024 * 1024 });
+  }
+  const first = curlOnce();
+  const second = curlOnce();
+  const status = output => Number((output.match(/__CEOAI_HTTP_CODE__:(\d{3})/) || [])[1] || 0);
+  const cacheStatus = output => ((output.match(/(?:^|\r?\n)x-ceoai-cache:\s*([^\r\n]+)/i) || [])[1] || '').trim();
+  assert.strictEqual(status(first), 200, 'public HTTPS first response should be 200; output: ' + first.slice(-1000));
+  assert.strictEqual(status(second), 200, 'public HTTPS second response should be 200; output: ' + second.slice(-1000));
+  assert.strictEqual(cacheStatus(first), 'MISS', 'public HTTPS first request should MISS; output: ' + first.slice(0, 1000));
+  assert.strictEqual(cacheStatus(second), 'HIT', 'public HTTPS second request should HIT; output: ' + second.slice(0, 1000));
+  console.log('Optional public HTTPS cache test passed: httpbin.org/cache/60 MISS -> HIT via curl.exe');
 }
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -424,6 +459,8 @@ function testConnectTunnel(proxyPort, echoPort) {
       headers: { 'content-type': 'application/json' }
     }, JSON.stringify({ cacheEnabled: true, cacheOnly: false, autoCleanHours: 24, maxObjectBytes: 2000000, filterMode: 'block', tlsInspectionEnabled: false }));
     assert.strictEqual(restoreConfig.status, 200);
+
+    testPublicHttpsCache(proxyPort, dashboardPort);
 
     const logs = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/logs' });
     assert.strictEqual(logs.status, 200);
