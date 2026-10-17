@@ -51,7 +51,10 @@ class LocalCertificateAuthority {
         const publicKey = certificate.publicKey;
         const pairMatches = privateKey.n && privateKey.e && publicKey.n && publicKey.e &&
           privateKey.n.compareTo(publicKey.n) === 0 && privateKey.e.compareTo(publicKey.e) === 0;
-        const isCA = certificate.extensions.some(extension => extension.name === 'basicConstraints' && extension.cA === true);
+        const basicConstraints = certificate.extensions.find(extension => extension.name === 'basicConstraints');
+        const keyUsage = certificate.extensions.find(extension => extension.name === 'keyUsage');
+        const isCA = Boolean(basicConstraints && basicConstraints.cA === true && basicConstraints.critical === true &&
+          keyUsage && keyUsage.keyCertSign === true && keyUsage.critical === true);
         const isSelfSigned = certificate.verify(certificate);
         const now = new Date();
         const isCurrentlyValid = certificate.validity.notBefore <= now && certificate.validity.notAfter > now;
@@ -75,8 +78,8 @@ class LocalCertificateAuthority {
     const name = [{ name: 'commonName', value: 'CEOAI Juwet Local Inspection CA' }, { name: 'organizationName', value: 'CEOAI Juwet' }];
     cert.setSubject(name); cert.setIssuer(name);
     cert.setExtensions([
-      { name: 'basicConstraints', cA: true, pathLenConstraint: 0 },
-      { name: 'keyUsage', keyCertSign: true, cRLSign: true },
+      { name: 'basicConstraints', cA: true, pathLenConstraint: 0, critical: true },
+      { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
       { name: 'subjectKeyIdentifier' }
     ]);
     cert.sign(keys.privateKey, forge.md.sha256.create());
