@@ -530,7 +530,9 @@ function proxyRequestImpl(req, res) {
   const requestCacheControl = String(req.headers['cache-control'] || '').toLowerCase();
   const requestForcesRefresh = /(?:^|,)[ \t]*(?:no-cache(?:[ \t]*=[^,]*)?|no-store|max-age[ \t]*=[ \t]*0)(?:[ \t]*(?:,|$))/.test(requestCacheControl) ||
     String(req.headers.pragma || '').toLowerCase().includes('no-cache');
-  const hasRangeOrConditional = Boolean(req.headers.range || req.headers['if-range'] || req.headers['if-none-match'] || req.headers['if-modified-since'] || req.headers['if-match'] || req.headers['if-unmodified-since']);
+  // Browser revalidation headers (If-None-Match / If-Modified-Since) may still use a fresh local object.
+  // Range and write-precondition headers remain ineligible for a full-object cache response.
+  const hasRangeOrConditional = Boolean(req.headers.range || req.headers['if-range'] || req.headers['if-match'] || req.headers['if-unmodified-since']);
   const httpsAuthorizedForCache = target.protocol !== 'https:' || req.socket.ceoaiTlsIntercepted === true;
   const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && !hasRangeOrConditional && config.cacheEnabled !== false && httpsAuthorizedForCache;
   // Do not create a domain folder for requests that are ineligible for caching (for example plain HTTPS CONNECT traffic).
@@ -621,7 +623,12 @@ function proxyRequestImpl(req, res) {
       const expiresAtHeader = Date.parse(upstreamRes.headers.expires || '');
       const expiresTtl = Number.isFinite(expiresAtHeader) ? Math.floor((expiresAtHeader - Date.now()) / 1000) : 0;
       const requestedTtl = match ? Number(match[1]) : expiresTtl;
-      const explicitlyFresh = requestedTtl > 0 && (Boolean(match) || expiresTtl > 0 || directives.includes('public'));
+      // A small heuristic lifetime is allowed for public static images when the origin supplies
+      // no freshness metadata. Never override explicit no-cache/no-store/private/Vary policies.
+      const isStaticImage = /^image\/(?:avif|gif|jpeg|png|svg\+xml|webp)(?:;|$)/i.test(String(upstreamRes.headers['content-type'] || ''));
+      const heuristicTtl = !match && expiresTtl <= 0 && isStaticImage ? 60 : 0;
+      const effectiveTtl = requestedTtl > 0 ? requestedTtl : heuristicTtl;
+      const explicitlyFresh = effectiveTtl > 0 && (Boolean(match) || expiresTtl > 0 || directives.includes('public') || heuristicTtl > 0);
       const responsePragma = String(upstreamRes.headers.pragma || '').toLowerCase();
       const hasNoCacheDirective = directives.some(value => /^no-cache(?:[ \t]*=|$)/.test(value));
       const mayStore = explicitlyFresh &&
@@ -630,8 +637,8 @@ function proxyRequestImpl(req, res) {
         !hasNoCacheDirective &&
         !responsePragma.split(',').some(value => value.trim() === 'no-cache') &&
         !directives.includes('must-revalidate') &&
-        requestedTtl > 0;
-      const ttl = Math.min(3600, Math.max(1, requestedTtl));
+        effectiveTtl > 0;
+      const ttl = Math.min(3600, Math.max(1, effectiveTtl));
       // Storage is allowed only for eligible HTTP requests or explicitly intercepted HTTPS.
       if (canCache && cacheHeadersAllowed && !tooLarge && size <= maxBytes && mayStore) {
         const body = Buffer.concat(chunks);
