@@ -257,6 +257,8 @@ function testConnectTunnel(proxyPort, echoPort) {
     const first = await proxyGet(proxyPort, originPort, 'cache-me');
     assert.strictEqual(first.status, 200);
     assert.strictEqual(first.headers['x-ceoai-cache'], 'MISS');
+    assert(fs.existsSync(path.join(dataDir, 'cache', '127.0.0.1')), 'cache entries must be grouped into a hostname folder');
+    assert(fs.readdirSync(path.join(dataDir, 'cache', '127.0.0.1')).some(name => name.endsWith('.json')), 'hostname folder must contain JSON cache entries');
     const cachedBody = first.body;
     assert.strictEqual(originCount, originCountBeforeCacheTest + 1, 'cache MISS should request upstream once');
 
@@ -396,8 +398,10 @@ function testConnectTunnel(proxyPort, echoPort) {
       headers: { 'content-type': 'application/json' }
     }, JSON.stringify({ filterMode: 'block' }));
 
-    const expiredPath = path.join(dataDir, 'cache', 'expired-test.json');
-    const malformedExpiryPath = path.join(dataDir, 'cache', 'malformed-expiry-test.json');
+    const cleanerDomainDir = path.join(dataDir, 'cache', 'cache-cleaner.test');
+    fs.mkdirSync(cleanerDomainDir, { recursive: true });
+    const expiredPath = path.join(cleanerDomainDir, 'expired-test.json');
+    const malformedExpiryPath = path.join(cleanerDomainDir, 'malformed-expiry-test.json');
     fs.writeFileSync(expiredPath, JSON.stringify({ expiresAt: 1, body: '', statusCode: 200 }));
     fs.writeFileSync(malformedExpiryPath, JSON.stringify({ expiresAt: 'not-a-date', body: '', statusCode: 200 }));
     const clean = await httpRequest({ host: '127.0.0.1', port: dashboardPort, path: '/api/cache/clean', method: 'POST' });
@@ -431,7 +435,9 @@ function testConnectTunnel(proxyPort, echoPort) {
 
     const corruptUrl = 'http://127.0.0.1:' + originPort + '/corrupt-cache';
     const corruptKey = crypto.createHash('sha256').update(corruptUrl).digest('hex');
-    fs.writeFileSync(path.join(dataDir, 'cache', corruptKey + '.json'), JSON.stringify({
+    const corruptDomainDir = path.join(dataDir, 'cache', '127.0.0.1');
+    fs.mkdirSync(corruptDomainDir, { recursive: true });
+    fs.writeFileSync(path.join(corruptDomainDir, corruptKey + '.json'), JSON.stringify({
       statusCode: 200, expiresAt: Date.now() + 60000, body: Buffer.from('poisoned').toString('base64'),
       headers: { 'x-corrupt': 'bad\nheader' }
     }));
