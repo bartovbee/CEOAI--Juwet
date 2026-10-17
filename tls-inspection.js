@@ -78,6 +78,7 @@ class LocalCertificateAuthority {
     this.ensureCA();
     if (this.contexts.has(host)) return this.contexts.get(host);
     const leafKeyPath = path.join(this.leafDir, crypto.createHash('sha256').update(host).digest('hex') + '.json');
+    if (fs.existsSync(leafKeyPath)) hardenWindowsPrivateFile(leafKeyPath);
     let leaf;
     try { leaf = JSON.parse(fs.readFileSync(leafKeyPath, 'utf8')); } catch {}
     if (!leaf) {
