@@ -19,10 +19,10 @@ function hardenWindowsPrivateFile(filePath) {
       stdio: ['ignore', 'pipe', 'pipe']
     }).trim();
   } else if (process.env.USERDOMAIN) {
-    username = String(process.env.USERDOMAIN).trim() + '\\\\' + username;
+    username = String(process.env.USERDOMAIN).trim() + '\\' + username;
   }
 
-  if (!username || /[\\r\\n"]/g.test(username)) {
+  if (!username || /[\r\n"]/g.test(username)) {
     throw new Error('Unable to resolve a safe Windows account name for CA private-key ACL.');
   }
 
