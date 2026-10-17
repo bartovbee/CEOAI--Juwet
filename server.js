@@ -236,10 +236,8 @@ function storeCacheObject(targetFile, value) {
 }
 function getCacheSummary() {
   let objects = 0, bytes = 0, expired = 0;
-  for (const name of fs.readdirSync(CACHE_DIR)) {
-    if (!name.endsWith('.json')) continue;
+  for (const file of cacheFiles()) {
     try {
-      const file = path.join(CACHE_DIR, name);
       const stat = fs.statSync(file);
       const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
       objects++;
