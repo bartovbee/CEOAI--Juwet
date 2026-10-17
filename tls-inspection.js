@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const tls = require('tls');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const forge = require('node-forge');
 
 function hardenWindowsPrivateFile(filePath) {
@@ -13,7 +13,7 @@ function hardenWindowsPrivateFile(filePath) {
   // Service runners may expose USERNAME=SYSTEM or no USERNAME at all.
   // Resolve the actual security principal rather than passing an empty variable to icacls.
   if (!username || /^SYSTEM$/i.test(username)) {
-    username = execSync('whoami', {
+    username = execFileSync('whoami', [], {
       encoding: 'utf8',
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
@@ -28,7 +28,7 @@ function hardenWindowsPrivateFile(filePath) {
 
   const safePath = String(filePath).replace(/"/g, '""');
   const safeUser = username.replace(/"/g, '""');
-  execSync('icacls "' + safePath + '" /inheritance:r /grant:r "' + safeUser + ':(R,W)"', {
+  execFileSync('icacls', [safePath, '/inheritance:r', '/grant:r', safeUser + ':(R,W)'], {
     windowsHide: true,
     stdio: 'pipe'
   });
