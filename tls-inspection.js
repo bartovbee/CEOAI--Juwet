@@ -118,7 +118,7 @@ class LocalCertificateAuthority {
         const hasMatchingSan = Boolean(san && san.altNames.some(name =>
           isIp ? name.type === 7 && String(name.ip).toLowerCase() === host :
             name.type === 2 && String(name.value).toLowerCase() === host));
-        leafValid = Boolean(pairMatches && isCurrentlyValid && hasMatchingSan && leafCert.verify(caCert));
+        leafValid = Boolean(pairMatches && isCurrentlyValid && hasMatchingSan && caCert.verify(leafCert));
       } catch {}
     }
 
