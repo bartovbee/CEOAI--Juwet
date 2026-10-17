@@ -181,11 +181,12 @@ function testConnectTunnel(proxyPort, echoPort) {
       'no-cache-fields': 'public, max-age=60, no-cache="set-cookie"',
       'pragma-no-cache': 'public, max-age=60',
       'no-freshness': '',
+      'static-image-no-freshness': '',
       'vary-response': 'public, max-age=60',
       'set-cookie-response': 'public, max-age=60'
     };
     const policy = policies[req.url.slice(1)];
-    const headers = { 'content-type': 'text/plain' };
+    const headers = { 'content-type': req.url === '/static-image-no-freshness' ? 'image/png' : 'text/plain' };
     if (req.url === '/hop-by-hop') {
       headers.connection = 'x-origin-hop';
       headers['x-origin-hop'] = 'must-not-cross-proxy';
@@ -301,6 +302,16 @@ function testConnectTunnel(proxyPort, echoPort) {
       assert.strictEqual(originCount, before + 2, pathName + ' should reach origin for both requests');
     }
 
+    const imageBefore = originCount;
+    const imageFirst = await proxyGet(proxyPort, originPort, 'static-image-no-freshness');
+    assert.strictEqual(imageFirst.status, 200);
+    assert.strictEqual(imageFirst.headers['x-ceoai-cache'], 'MISS', 'public static image without explicit freshness should be stored with a short heuristic lifetime');
+    const imageSecond = await proxyGet(proxyPort, originPort, 'static-image-no-freshness');
+    assert.strictEqual(imageSecond.status, 200);
+    assert.strictEqual(imageSecond.headers['x-ceoai-cache'], 'HIT', 'public static image should be served from the local cache on repeat request');
+    assert.strictEqual(imageSecond.body, imageFirst.body);
+    assert.strictEqual(originCount, imageBefore + 1, 'cached static image repeat must not reach origin');
+
     const malformedDelete = await httpRequest({
       host: '127.0.0.1', port: dashboardPort,
       path: '/api/blocked/%E0%A4%A', method: 'DELETE'
@@ -338,8 +349,9 @@ function testConnectTunnel(proxyPort, echoPort) {
       headers: { host: '127.0.0.1:' + originPort, 'if-none-match': '"client-etag"' }
     });
     assert.strictEqual(conditionalRequest.status, 200);
-    assert.strictEqual(conditionalRequest.headers['x-ceoai-cache'], 'BYPASS', 'conditional requests must reach upstream');
-    assert.strictEqual(originCount, originCountBeforeRangeAndConditional + 2, 'Range and conditional requests must reach upstream');
+    assert.strictEqual(conditionalRequest.headers['x-ceoai-cache'], 'HIT', 'If-None-Match revalidation should reuse the fresh local object');
+    assert.strictEqual(conditionalRequest.body, cachedBody, 'conditional local cache response should preserve the cached body');
+    assert.strictEqual(originCount, originCountBeforeRangeAndConditional + 1, 'Range requests should reach upstream while a fresh cached conditional request should not');
 
     const addBlock = await httpRequest({
       host: '127.0.0.1', port: dashboardPort, path: '/api/blocked', method: 'POST',
