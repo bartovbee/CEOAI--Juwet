@@ -103,6 +103,28 @@ function interceptedGet(proxyPort, originPort, caPem) {
   assert.strictEqual(recoveryCA.getCertificateInfo().available, true, 'regenerated CA should be readable');
   assert.strictEqual(fs.readdirSync(recoveryCA.leafDir).length, 0, 'old leaf certificates must be removed after CA rotation');
   recoveryCA.getContext('localhost');
+  const recoveredCert = forge.pki.certificateFromPem(recoveredPem);
+  const recoveredKey = forge.pki.privateKeyFromPem(fs.readFileSync(recoveryCA.keyPath, 'utf8'));
+  assert.strictEqual(recoveredKey.n.bitLength(), 2048, 'local Root CA private key must be RSA 2048-bit');
+  assert.strictEqual(recoveredCert.publicKey.n.bitLength(), 2048, 'local Root CA public key must be RSA 2048-bit');
+  assert.strictEqual(recoveredCert.signatureOid, forge.pki.oids.sha256WithRSAEncryption, 'local Root CA must use SHA-256 with RSA');
+
+  const leafPath = path.join(recoveryCA.leafDir, require('crypto').createHash('sha256').update('localhost').digest('hex') + '.json');
+  const leaf = JSON.parse(fs.readFileSync(leafPath, 'utf8'));
+  const leafKey = forge.pki.privateKeyFromPem(leaf.key);
+  const leafCert = forge.pki.certificateFromPem(leaf.cert);
+  assert.strictEqual(leafKey.n.bitLength(), 2048, 'dynamic leaf private key must be RSA 2048-bit');
+  assert.strictEqual(leafCert.publicKey.n.bitLength(), 2048, 'dynamic leaf public key must be RSA 2048-bit');
+  assert.strictEqual(leafCert.signatureOid, forge.pki.oids.sha256WithRSAEncryption, 'dynamic leaf must use SHA-256 with RSA');
+  const leafSan = leafCert.extensions.find(extension => extension.name === 'subjectAltName');
+  assert(leafSan && leafSan.altNames.some(name => name.type === 2 && name.value === 'localhost'), 'DNS leaf must contain matching DNS SAN');
+
+  recoveryCA.getContext('127.0.0.1');
+  const ipLeafPath = path.join(recoveryCA.leafDir, require('crypto').createHash('sha256').update('127.0.0.1').digest('hex') + '.json');
+  const ipLeaf = JSON.parse(fs.readFileSync(ipLeafPath, 'utf8'));
+  const ipCert = forge.pki.certificateFromPem(ipLeaf.cert);
+  const ipSan = ipCert.extensions.find(extension => extension.name === 'subjectAltName');
+  assert(ipSan && ipSan.altNames.some(name => name.type === 7 && name.ip === '127.0.0.1'), 'IP leaf must contain matching IP SAN');
 
   const originCA = certPair('127.0.0.1');
   const originCaPath = path.join(dataDir, 'origin-ca.pem');
