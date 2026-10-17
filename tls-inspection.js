@@ -8,10 +8,27 @@ const forge = require('node-forge');
 
 function hardenWindowsPrivateFile(filePath) {
   if (process.platform !== 'win32') return;
-  // Remove inherited ACLs, then grant read/write only to the current Windows user.
-  // The path is quoted and embedded quotes are doubled for cmd.exe.
+
+  let username = String(process.env.USERNAME || '').trim();
+  // Service runners may expose USERNAME=SYSTEM or no USERNAME at all.
+  // Resolve the actual security principal rather than passing an empty variable to icacls.
+  if (!username || /^SYSTEM$/i.test(username)) {
+    username = execSync('whoami', {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim();
+  } else if (process.env.USERDOMAIN) {
+    username = String(process.env.USERDOMAIN).trim() + '\\\\' + username;
+  }
+
+  if (!username || /[\\r\\n"]/g.test(username)) {
+    throw new Error('Unable to resolve a safe Windows account name for CA private-key ACL.');
+  }
+
   const safePath = String(filePath).replace(/"/g, '""');
-  execSync('icacls "' + safePath + '" /inheritance:r /grant:r "%USERNAME%:(R,W)"', {
+  const safeUser = username.replace(/"/g, '""');
+  execSync('icacls "' + safePath + '" /inheritance:r /grant:r "' + safeUser + ':(R,W)"', {
     windowsHide: true,
     stdio: 'pipe'
   });
