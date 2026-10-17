@@ -533,7 +533,8 @@ function proxyRequestImpl(req, res) {
   const hasRangeOrConditional = Boolean(req.headers.range || req.headers['if-range'] || req.headers['if-none-match'] || req.headers['if-modified-since'] || req.headers['if-match'] || req.headers['if-unmodified-since']);
   const httpsAuthorizedForCache = target.protocol !== 'https:' || req.socket.ceoaiTlsIntercepted === true;
   const canCache = safeMethod && !hasCredentials && !requestForcesRefresh && !hasRangeOrConditional && config.cacheEnabled !== false && httpsAuthorizedForCache;
-  const cacheFile = cacheFileForUrl(target.href);
+  // Do not create a domain folder for requests that are ineligible for caching (for example plain HTTPS CONNECT traffic).
+  const cacheFile = canCache ? cacheFileForUrl(target.href) : null;
   if (canCache) {
     try {
       const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
