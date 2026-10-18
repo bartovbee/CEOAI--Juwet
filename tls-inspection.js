@@ -167,7 +167,9 @@ class LocalCertificateAuthority {
       return { available: false, error: 'CA belum dibuat; unduh sertifikat atau aktifkan inspeksi TLS untuk membuat CA lokal.' };
     }
     const cert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
-    return { available: true, subject: cert.subject.getField('CN').value, expiresAt: cert.validity.notAfter.toISOString(), certificatePath: this.certPath };
+    const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+    const fingerprintSha256 = crypto.createHash('sha256').update(der, 'binary').digest('hex').toUpperCase().match(/.{2}/g).join(':');
+    return { available: true, subject: cert.subject.getField('CN').value, expiresAt: cert.validity.notAfter.toISOString(), certificatePath: this.certPath, fingerprintSha256 };
   }
 }
 module.exports = { LocalCertificateAuthority };
