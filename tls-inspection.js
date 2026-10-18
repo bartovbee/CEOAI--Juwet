@@ -3,13 +3,42 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const tls = require('tls');
+const { execFileSync } = require('child_process');
 const forge = require('node-forge');
+
+function hardenWindowsPrivateFile(filePath) {
+  if (process.platform !== 'win32') return;
+
+  let username = String(process.env.USERNAME || '').trim();
+  // Service runners may expose USERNAME=SYSTEM or no USERNAME at all.
+  // Resolve the actual security principal rather than passing an empty variable to icacls.
+  if (!username || /^SYSTEM$/i.test(username)) {
+    username = execFileSync('whoami', [], {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim();
+  } else if (process.env.USERDOMAIN) {
+    username = String(process.env.USERDOMAIN).trim() + '\\' + username;
+  }
+
+  if (!username || /[\r\n"]/g.test(username)) {
+    throw new Error('Unable to resolve a safe Windows account name for CA private-key ACL.');
+  }
+
+  const safePath = String(filePath).replace(/"/g, '""');
+  const safeUser = username.replace(/"/g, '""');
+  execFileSync('icacls', [safePath, '/inheritance:r', '/grant:r', safeUser + ':(R,W)'], {
+    windowsHide: true,
+    stdio: 'pipe'
+  });
+}
 
 class LocalCertificateAuthority {
   constructor(dataDir) {
     this.dir = path.join(dataDir, 'tls');
-    this.keyPath = path.join(this.dir, 'ca-key.pem');
-    this.certPath = path.join(this.dir, 'ca-cert.pem');
+    this.keyPath = path.join(this.dir, 'rootCA.key');
+    this.certPath = path.join(this.dir, 'rootCA.pem');
     this.leafDir = path.join(this.dir, 'hosts');
     this.contexts = new Map();
     fs.mkdirSync(this.leafDir, { recursive: true });
@@ -22,11 +51,19 @@ class LocalCertificateAuthority {
         const publicKey = certificate.publicKey;
         const pairMatches = privateKey.n && privateKey.e && publicKey.n && publicKey.e &&
           privateKey.n.compareTo(publicKey.n) === 0 && privateKey.e.compareTo(publicKey.e) === 0;
-        const isCA = certificate.extensions.some(extension => extension.name === 'basicConstraints' && extension.cA === true);
+        const basicConstraints = certificate.extensions.find(extension => extension.name === 'basicConstraints');
+        const keyUsage = certificate.extensions.find(extension => extension.name === 'keyUsage');
+        // Preserve valid legacy CAs: making extensions critical is good for newly generated roots,
+        // but requiring it here rotates an already trusted CA and breaks Chrome trust on existing installs.
+        const isCA = Boolean(basicConstraints && basicConstraints.cA === true &&
+          keyUsage && keyUsage.keyCertSign === true);
         const isSelfSigned = certificate.verify(certificate);
         const now = new Date();
         const isCurrentlyValid = certificate.validity.notBefore <= now && certificate.validity.notAfter > now;
-        if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) return;
+        if (pairMatches && isCA && isSelfSigned && isCurrentlyValid) {
+          hardenWindowsPrivateFile(this.keyPath);
+          return;
+        }
       } catch {}
       // Invalid, expired, or mismatched CA files cannot be trusted; rotate and clear leaves.
     }
@@ -43,12 +80,13 @@ class LocalCertificateAuthority {
     const name = [{ name: 'commonName', value: 'CEOAI Juwet Local Inspection CA' }, { name: 'organizationName', value: 'CEOAI Juwet' }];
     cert.setSubject(name); cert.setIssuer(name);
     cert.setExtensions([
-      { name: 'basicConstraints', cA: true, pathLenConstraint: 0 },
-      { name: 'keyUsage', keyCertSign: true, cRLSign: true },
+      { name: 'basicConstraints', cA: true, pathLenConstraint: 0, critical: true },
+      { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
       { name: 'subjectKeyIdentifier' }
     ]);
     cert.sign(keys.privateKey, forge.md.sha256.create());
     fs.writeFileSync(this.keyPath, forge.pki.privateKeyToPem(keys.privateKey), { mode: 0o600 });
+    hardenWindowsPrivateFile(this.keyPath);
     fs.writeFileSync(this.certPath, forge.pki.certificateToPem(cert), { mode: 0o644 });
     this.contexts.clear();
   }
@@ -62,11 +100,34 @@ class LocalCertificateAuthority {
     this.ensureCA();
     if (this.contexts.has(host)) return this.contexts.get(host);
     const leafKeyPath = path.join(this.leafDir, crypto.createHash('sha256').update(host).digest('hex') + '.json');
+    if (fs.existsSync(leafKeyPath)) hardenWindowsPrivateFile(leafKeyPath);
+    const caKey = forge.pki.privateKeyFromPem(fs.readFileSync(this.keyPath, 'utf8'));
+    const caCert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
     let leaf;
     try { leaf = JSON.parse(fs.readFileSync(leafKeyPath, 'utf8')); } catch {}
-    if (!leaf) {
-      const caKey = forge.pki.privateKeyFromPem(fs.readFileSync(this.keyPath, 'utf8'));
-      const caCert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
+
+    // Validate persisted leaf material before reusing it. A truncated file, mismatched
+    // key/certificate, expired certificate, wrong SAN, or leaf signed by an old CA
+    // must not turn every later HTTPS request into a permanent TLS failure.
+    let leafValid = false;
+    if (leaf && typeof leaf.key === 'string' && typeof leaf.cert === 'string') {
+      try {
+        const leafKey = forge.pki.privateKeyFromPem(leaf.key);
+        const leafCert = forge.pki.certificateFromPem(leaf.cert);
+        const pairMatches = leafKey.n && leafKey.e && leafCert.publicKey.n && leafCert.publicKey.e &&
+          leafKey.n.compareTo(leafCert.publicKey.n) === 0 && leafKey.e.compareTo(leafCert.publicKey.e) === 0;
+        const now = new Date();
+        const isCurrentlyValid = leafCert.validity.notBefore <= now && leafCert.validity.notAfter > now;
+        const san = leafCert.extensions.find(extension => extension.name === 'subjectAltName');
+        const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
+        const hasMatchingSan = Boolean(san && san.altNames.some(name =>
+          isIp ? name.type === 7 && String(name.ip).toLowerCase() === host :
+            name.type === 2 && String(name.value).toLowerCase() === host));
+        leafValid = Boolean(pairMatches && isCurrentlyValid && hasMatchingSan && caCert.verify(leafCert));
+      } catch {}
+    }
+
+    if (!leafValid) {
       const keys = forge.pki.rsa.generateKeyPair(2048);
       const cert = forge.pki.createCertificate();
       cert.publicKey = keys.publicKey;
@@ -84,19 +145,31 @@ class LocalCertificateAuthority {
       ]);
       cert.sign(caKey, forge.md.sha256.create());
       leaf = { key: forge.pki.privateKeyToPem(keys.privateKey), cert: forge.pki.certificateToPem(cert) };
-      fs.writeFileSync(leafKeyPath, JSON.stringify(leaf), { mode: 0o600 });
+      const tempPath = leafKeyPath + '.tmp-' + process.pid + '-' + crypto.randomBytes(4).toString('hex');
+      try {
+        fs.writeFileSync(tempPath, JSON.stringify(leaf), { flag: 'wx', mode: 0o600 });
+        hardenWindowsPrivateFile(tempPath);
+        // Windows rename does not replace an existing destination file.
+        try { fs.unlinkSync(leafKeyPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+        fs.renameSync(tempPath, leafKeyPath);
+      } finally {
+        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+      }
+      hardenWindowsPrivateFile(leafKeyPath);
     }
     const context = tls.createSecureContext({ key: leaf.key, cert: leaf.cert });
     this.contexts.set(host, context);
     return context;
   }
   getCertificateInfo() {
-    // Status polling must not create a CA/private key while TLS inspection is disabled.
+    // Report the persisted local CA without changing key material.
     if (!fs.existsSync(this.keyPath) || !fs.existsSync(this.certPath)) {
       return { available: false, error: 'CA belum dibuat; unduh sertifikat atau aktifkan inspeksi TLS untuk membuat CA lokal.' };
     }
     const cert = forge.pki.certificateFromPem(fs.readFileSync(this.certPath, 'utf8'));
-    return { available: true, subject: cert.subject.getField('CN').value, expiresAt: cert.validity.notAfter.toISOString(), certificatePath: this.certPath };
+    const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+    const fingerprintSha256 = crypto.createHash('sha256').update(der, 'binary').digest('hex').toUpperCase().match(/.{2}/g).join(':');
+    return { available: true, subject: cert.subject.getField('CN').value, expiresAt: cert.validity.notAfter.toISOString(), certificatePath: this.certPath, fingerprintSha256 };
   }
 }
 module.exports = { LocalCertificateAuthority };

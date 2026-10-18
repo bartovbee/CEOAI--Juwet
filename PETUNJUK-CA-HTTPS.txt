@@ -1,0 +1,55 @@
+CEOAI JUWET — PETUNJUK SERTIFIKAT CA DAN TES HTTPS
+==================================================
+
+TUJUAN
+Petunjuk ini menjelaskan cara mengimpor sertifikat CA publik CEOAI Juwet ke Windows untuk perangkat milik sendiri atau yang memang berwenang dikelola. Jangan memasang CA yang tidak Anda kenali.
+
+A. UNDUH SERTIFIKAT CA
+1. Jalankan CEOAI Juwet.
+2. Buka menu "TLS & HTTPS".
+3. Klik "Unduh sertifikat CA publik".
+4. Simpan file .pem yang diunduh. File PEM adalah format teks sertifikat; tidak perlu diubah menjadi .crt.
+
+B. IMPOR KE WINDOWS (CURRENT USER)
+1. Tekan Win + R.
+2. Ketik certmgr.msc lalu tekan Enter.
+3. Di panel kiri, buka:
+   Trusted Root Certification Authorities
+   -> Certificates
+4. Klik kanan "Certificates" -> All Tasks -> Import.
+5. Klik Next -> Browse.
+6. Pada pemilih file, ubah jenis file menjadi "All Files (*.*)" jika file .pem tidak terlihat.
+7. Pilih file .pem yang diunduh dari CEOAI Juwet.
+8. Pilih "Place all certificates in the following store".
+9. Pastikan store adalah "Trusted Root Certification Authorities".
+10. Selesaikan wizard. Verifikasi nama penerbit/subject sertifikat sebelum mempercayainya.
+
+C. VERIFIKASI
+1. Di certmgr.msc, buka Trusted Root Certification Authorities -> Certificates.
+2. Cari "CEOAI Juwet Local Inspection CA" (nama dapat berbeda jika versi aplikasi berubah).
+3. Klik dua kali -> Details -> Thumbprint.
+4. Bandingkan thumbprint dengan sertifikat CA yang diunduh. Abaikan spasi dan perbedaan huruf besar/kecil; semua digit harus cocok.
+5. Tutup semua jendela Chrome, lalu buka kembali.
+6. Pastikan browser/Windows dikonfigurasi untuk menggunakan proxy CEOAI Juwet yang benar.
+7. Uji kembali situs HTTPS.
+
+D. JIKA CHROME MASIH MENAMPILKAN ERR_CERT_AUTHORITY_INVALID
+- Jangan klik Advanced untuk melewati peringatan.
+- Pastikan sertifikat CA yang diunduh sama dengan CA yang dipasang.
+- Pastikan trafik HTTPS benar-benar melewati proxy dengan inspeksi TLS aktif.
+- Periksa log CEOAI Juwet dan sertifikat situs yang disajikan. CA yang cocok saja belum membuktikan sertifikat leaf/chain valid.
+- Jika error tetap muncul, simpan screenshot error dan catat URL, waktu, serta log terkait untuk diagnosis.
+
+E. TES CACHE
+- Cache HIT tidak dijamin untuk setiap URL. Respons harus memenuhi kebijakan cache (misalnya GET dan freshness yang sesuai).
+- Gunakan URL uji yang dikendalikan sendiri dengan Cache-Control: public, max-age=60.
+- Request pertama diharapkan MISS; request kedua ke URL yang sama diharapkan HIT jika inspeksi TLS aktif, sertifikat dipercaya, dan seluruh request melewati proxy.
+- CONNECT 200 saja bukan bukti bahwa isi HTTPS telah diinspeksi atau di-cache.
+
+KEAMANAN
+- Aktifkan inspeksi TLS hanya pada perangkat/jaringan yang Anda miliki atau berwenang kelola.
+- Sertifikat CA lokal dapat membuat perangkat mempercayai sertifikat situs yang ditandatangani CA tersebut. Jangan bagikan private key CA.
+- Jangan menghapus atau membagikan private key CA. Jangan menerobos peringatan sertifikat browser.
+
+STATUS DIAGNOSIS
+Dokumen ini adalah panduan, bukan bukti bahwa bug telah diperbaiki. Nyatakan FIX hanya setelah pengujian nyata, tes regresi, build Windows x64, smoke test, dan artefak terbaru diverifikasi.

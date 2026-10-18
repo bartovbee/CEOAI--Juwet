@@ -1,1 +1,232 @@
-<full tests/tls-integration.js content here>
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
+const tls = require('tls');
+const net = require('net');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
+const forge = require('node-forge');
+const { LocalCertificateAuthority } = require('../tls-inspection');
+
+function certPair(host) {
+  const keys = forge.pki.rsa.generateKeyPair(2048);
+  const ca = forge.pki.createCertificate();
+  ca.publicKey = keys.publicKey;
+  ca.serialNumber = '01' + require('crypto').randomBytes(15).toString('hex');
+  ca.validity.notBefore = new Date(Date.now() - 60000);
+  ca.validity.notAfter = new Date(Date.now() + 86400000);
+  const subject = [{ name: 'commonName', value: 'CEOAI test origin CA' }];
+  ca.setSubject(subject); ca.setIssuer(subject);
+  ca.setExtensions([{ name: 'basicConstraints', cA: true }, { name: 'keyUsage', keyCertSign: true, cRLSign: true }]);
+  ca.sign(keys.privateKey, forge.md.sha256.create());
+  const leafKeys = forge.pki.rsa.generateKeyPair(2048);
+  const leaf = forge.pki.createCertificate();
+  leaf.publicKey = leafKeys.publicKey;
+  leaf.serialNumber = '02' + require('crypto').randomBytes(15).toString('hex');
+  leaf.validity.notBefore = new Date(Date.now() - 60000);
+  leaf.validity.notAfter = new Date(Date.now() + 86400000);
+  leaf.setSubject([{ name: 'commonName', value: host }]); leaf.setIssuer(ca.subject.attributes);
+  leaf.setExtensions([{ name: 'basicConstraints', cA: false }, { name: 'keyUsage', digitalSignature: true, keyEncipherment: true }, { name: 'extKeyUsage', serverAuth: true }, { name: 'subjectAltName', altNames: [{ type: 7, ip: host }, { type: 2, value: 'localhost' }] }]);
+  leaf.sign(keys.privateKey, forge.md.sha256.create());
+  return { ca: forge.pki.certificateToPem(ca), key: forge.pki.privateKeyToPem(leafKeys.privateKey), cert: forge.pki.certificateToPem(leaf) };
+}
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer(); s.once('error', reject);
+    s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(e => e ? reject(e) : resolve(p)); });
+  });
+}
+function request(port, pathName, method = 'GET', body = '') {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path: pathName, method, headers: body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {} }, res => {
+      const chunks = []; res.on('data', c => chunks.push(c)); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString() }));
+    });
+    req.setTimeout(8000, () => req.destroy(new Error('request timeout')));
+    req.on('error', reject); if (body) req.write(body); req.end();
+  });
+}
+function interceptedGet(proxyPort, originPort, caPem) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(proxyPort, '127.0.0.1');
+    let responseHeader = ''; let tlsSocket; let finished = false; let response = Buffer.alloc(0);
+    const timer = setTimeout(() => finish(new Error('TLS HTTPS cache request timeout')), 12000);
+    function finish(err, result) {
+      if (finished) return; finished = true; clearTimeout(timer);
+      socket.destroy(); if (tlsSocket) tlsSocket.destroy();
+      if (err) reject(err); else resolve(result);
+    }
+    socket.once('connect', () => socket.write('CONNECT localhost:' + originPort + ' HTTP/1.1\r\nHost: localhost:' + originPort + '\r\n\r\n'));
+    socket.on('data', chunk => {
+      if (tlsSocket) return;
+      responseHeader += chunk.toString('latin1');
+      const end = responseHeader.indexOf('\r\n\r\n');
+      if (end < 0) return;
+      const statusLine = responseHeader.slice(0, responseHeader.indexOf('\r\n'));
+      if (!/^HTTP\/1\.1 200 /.test(statusLine)) return finish(new Error('CONNECT rejected: ' + statusLine));
+      socket.removeAllListeners('data');
+      tlsSocket = tls.connect({ socket, ca: caPem, rejectUnauthorized: true, checkServerIdentity: (_host, cert) => tls.checkServerIdentity('localhost', cert) });
+      tlsSocket.once('secureConnect', () => tlsSocket.write('GET /https-cache HTTP/1.1\r\nHost: localhost:' + originPort + '\r\nConnection: close\r\n\r\n'));
+      tlsSocket.on('data', chunk2 => {
+        response = Buffer.concat([response, chunk2]);
+        const split = response.indexOf('\r\n\r\n');
+        if (split < 0) return;
+        const header = response.subarray(0, split).toString('latin1');
+        const lenMatch = header.match(/(?:^|\r\n)content-length:\s*(\d+)/i);
+        if (!lenMatch) return;
+        const length = Number(lenMatch[1]);
+        if (response.length >= split + 4 + length) {
+          const status = Number((header.match(/^HTTP\/1\.1 (\d+)/) || [])[1]);
+          const cache = (header.match(/(?:^|\r\n)x-ceoai-cache:\s*([^\r\n]+)/i) || [])[1] || '';
+          const body = response.subarray(split + 4, split + 4 + length).toString();
+          finish(null, { status, cache: cache.trim(), body, header });
+        }
+      });
+      tlsSocket.on('error', finish);
+    });
+    socket.on('error', finish);
+  });
+}
+(async () => {
+  const root = path.join(__dirname, '..');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ceoai-tls-test-'));
+
+  // A previously trusted CA generated by older versions used valid but non-critical CA
+  // extensions. Startup must preserve it; rotating it silently invalidates Windows trust.
+  const legacyDir = path.join(dataDir, 'legacy-ca');
+  const legacyCA = new LocalCertificateAuthority(legacyDir);
+  const legacyKeys = forge.pki.rsa.generateKeyPair(2048);
+  const legacyCert = forge.pki.createCertificate();
+  legacyCert.publicKey = legacyKeys.publicKey;
+  legacyCert.serialNumber = '03' + require('crypto').randomBytes(15).toString('hex');
+  legacyCert.validity.notBefore = new Date(Date.now() - 60000);
+  legacyCert.validity.notAfter = new Date(Date.now() + 86400000);
+  const legacyName = [{ name: 'commonName', value: 'CEOAI Juwet Local Inspection CA' }, { name: 'organizationName', value: 'CEOAI Juwet' }];
+  legacyCert.setSubject(legacyName); legacyCert.setIssuer(legacyName);
+  legacyCert.setExtensions([
+    { name: 'basicConstraints', cA: true },
+    { name: 'keyUsage', keyCertSign: true, cRLSign: true },
+    { name: 'subjectKeyIdentifier' }
+  ]);
+  legacyCert.sign(legacyKeys.privateKey, forge.md.sha256.create());
+  const legacyPem = forge.pki.certificateToPem(legacyCert);
+  fs.mkdirSync(legacyCA.dir, { recursive: true });
+  fs.writeFileSync(legacyCA.keyPath, forge.pki.privateKeyToPem(legacyKeys.privateKey));
+  fs.writeFileSync(legacyCA.certPath, legacyPem);
+  assert.strictEqual(legacyCA.getCertificatePem(), legacyPem,
+    'valid legacy CA must be preserved so existing Windows trust remains valid');
+  const recoveryDir = path.join(dataDir, 'ca-recovery');
+  const recoveryCA = new LocalCertificateAuthority(recoveryDir);
+  fs.mkdirSync(recoveryCA.dir, { recursive: true });
+  fs.writeFileSync(recoveryCA.keyPath, 'not-a-private-key');
+  fs.writeFileSync(recoveryCA.certPath, 'not-a-certificate');
+  fs.writeFileSync(path.join(recoveryCA.leafDir, 'stale-leaf.json'), '{"key":"stale","cert":"stale"}');
+  const recoveredPem = recoveryCA.getCertificatePem();
+  assert(recoveredPem.includes('BEGIN CERTIFICATE'), 'invalid local CA files should be regenerated');
+  assert.strictEqual(recoveryCA.getCertificateInfo().available, true, 'regenerated CA should be readable');
+  assert.strictEqual(fs.readdirSync(recoveryCA.leafDir).length, 0, 'old leaf certificates must be removed after CA rotation');
+  recoveryCA.getContext('localhost');
+  const recoveredCert = forge.pki.certificateFromPem(recoveredPem);
+  const recoveredKey = forge.pki.privateKeyFromPem(fs.readFileSync(recoveryCA.keyPath, 'utf8'));
+  assert.strictEqual(recoveredKey.n.bitLength(), 2048, 'local Root CA private key must be RSA 2048-bit');
+  assert.strictEqual(recoveredCert.publicKey.n.bitLength(), 2048, 'local Root CA public key must be RSA 2048-bit');
+  assert.strictEqual(recoveredCert.signatureOid, forge.pki.oids.sha256WithRSAEncryption, 'local Root CA must use SHA-256 with RSA');
+  const rootBasicConstraints = recoveredCert.extensions.find(extension => extension.name === 'basicConstraints');
+  const rootKeyUsage = recoveredCert.extensions.find(extension => extension.name === 'keyUsage');
+  assert(rootBasicConstraints && rootBasicConstraints.critical === true && rootBasicConstraints.cA === true, 'Root CA basicConstraints must be critical and identify a CA');
+  assert(rootKeyUsage && rootKeyUsage.critical === true && rootKeyUsage.keyCertSign === true, 'Root CA keyUsage must be critical and permit certificate signing');
+
+  const leafPath = path.join(recoveryCA.leafDir, require('crypto').createHash('sha256').update('localhost').digest('hex') + '.json');
+  const leaf = JSON.parse(fs.readFileSync(leafPath, 'utf8'));
+  const leafKey = forge.pki.privateKeyFromPem(leaf.key);
+  const leafCert = forge.pki.certificateFromPem(leaf.cert);
+  assert.strictEqual(leafKey.n.bitLength(), 2048, 'dynamic leaf private key must be RSA 2048-bit');
+  assert.strictEqual(leafCert.publicKey.n.bitLength(), 2048, 'dynamic leaf public key must be RSA 2048-bit');
+  assert.strictEqual(leafCert.signatureOid, forge.pki.oids.sha256WithRSAEncryption, 'dynamic leaf must use SHA-256 with RSA');
+  const leafSan = leafCert.extensions.find(extension => extension.name === 'subjectAltName');
+  assert(leafSan && leafSan.altNames.some(name => name.type === 2 && name.value === 'localhost'), 'DNS leaf must contain matching DNS SAN');
+
+  // Corrupted persisted leaf material must be regenerated instead of breaking all future TLS requests.
+  fs.writeFileSync(leafPath, JSON.stringify({ key: 'corrupted-key', cert: 'corrupted-cert' }));
+  const leafRecoveryCA = new LocalCertificateAuthority(recoveryDir);
+  leafRecoveryCA.getContext('localhost');
+  const repairedLeaf = JSON.parse(fs.readFileSync(leafPath, 'utf8'));
+  const repairedLeafKey = forge.pki.privateKeyFromPem(repairedLeaf.key);
+  const repairedLeafCert = forge.pki.certificateFromPem(repairedLeaf.cert);
+  assert.strictEqual(repairedLeafKey.n.compareTo(repairedLeafCert.publicKey.n), 0, 'corrupted leaf key/certificate pair must be regenerated');
+  assert(recoveredCert.verify(repairedLeafCert), 'repaired leaf must be signed by the current Root CA');
+  const repairedSan = repairedLeafCert.extensions.find(extension => extension.name === 'subjectAltName');
+  assert(repairedSan && repairedSan.altNames.some(name => name.type === 2 && name.value === 'localhost'), 'repaired leaf must retain matching DNS SAN');
+
+  recoveryCA.getContext('127.0.0.1');
+  const ipLeafPath = path.join(recoveryCA.leafDir, require('crypto').createHash('sha256').update('127.0.0.1').digest('hex') + '.json');
+  const ipLeaf = JSON.parse(fs.readFileSync(ipLeafPath, 'utf8'));
+  const ipCert = forge.pki.certificateFromPem(ipLeaf.cert);
+  const ipSan = ipCert.extensions.find(extension => extension.name === 'subjectAltName');
+  assert(ipSan && ipSan.altNames.some(name => name.type === 7 && name.ip === '127.0.0.1'), 'IP leaf must contain matching IP SAN');
+
+  const originCA = certPair('127.0.0.1');
+  const originCaPath = path.join(dataDir, 'origin-ca.pem');
+  fs.writeFileSync(originCaPath, originCA.ca);
+  const origin = https.createServer({ key: originCA.key, cert: originCA.cert }, (req, res) => {
+    originCount++;
+    res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'public, max-age=60', 'content-length': Buffer.byteLength('secure-origin-' + originCount) });
+    res.end('secure-origin-' + originCount);
+  });
+  let originCount = 0;
+  const originPort = await new Promise((resolve, reject) => { origin.once('error', reject); origin.listen(0, '127.0.0.1', () => resolve(origin.address().port)); });
+  const proxyPort = await freePort(), dashboardPort = await freePort();
+  const appEnv = { ...process.env, PROXY_PORT: String(proxyPort), DASHBOARD_PORT: String(dashboardPort), CEOAI_DATA_DIR: path.join(dataDir, 'appdata'), NODE_EXTRA_CA_CERTS: originCaPath, CEOAI_OPEN_BROWSER: '0' };
+  const testExecutable = process.env.CEOAI_TEST_EXECUTABLE;
+  const child = testExecutable
+    ? spawn(path.resolve(testExecutable), [], { cwd: root, env: appEnv, stdio: 'ignore' })
+    : spawn(process.execPath, [path.join(root, 'server.js')], { cwd: root, env: appEnv, stdio: 'ignore' });
+  try {
+    let ready = false;
+    for (let i = 0; i < 80; i++) { try { if ((await request(dashboardPort, '/api/status')).status === 200) { ready = true; break; } } catch {} await new Promise(r => setTimeout(r, 125)); }
+    assert(ready, 'dashboard should start');
+    const initial = await request(dashboardPort, '/api/tls/status');
+    assert.strictEqual(initial.status, 200);
+    assert.strictEqual(JSON.parse(initial.body).enabled, false, 'TLS inspection must be disabled by default');
+    assert.strictEqual(JSON.parse(initial.body).ca.available, true, 'startup should provision a Root CA while TLS inspection is disabled');
+    assert.strictEqual(fs.existsSync(path.join(dataDir, 'appdata', 'tls', 'rootCA.key')), true, 'startup should create the Root CA private key');
+    assert.strictEqual(fs.existsSync(path.join(dataDir, 'appdata', 'tls', 'rootCA.pem')), true, 'startup should create the Root CA certificate');
+    const ca = await request(dashboardPort, '/api/tls/ca.pem');
+    assert.strictEqual(ca.status, 200);
+    const tlsStatus = await request(dashboardPort, '/api/tls/status');
+    assert.strictEqual(tlsStatus.status, 200);
+    const activeFingerprint = JSON.parse(tlsStatus.body).ca.fingerprintSha256;
+    assert.match(activeFingerprint, /^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/, 'TLS status should expose a SHA-256 fingerprint for the active CA');
+    const activeCert = forge.pki.certificateFromPem(ca.body);
+    const activeDer = forge.asn1.toDer(forge.pki.certificateToAsn1(activeCert)).getBytes();
+    const downloadedFingerprint = require('crypto').createHash('sha256').update(activeDer, 'binary').digest('hex').toUpperCase().match(/.{2}/g).join(':');
+    assert.strictEqual(activeFingerprint, downloadedFingerprint, 'TLS status fingerprint must match the CA PEM actually served by the running executable');
+    const config = await request(dashboardPort, '/api/config', 'POST', JSON.stringify({ tlsInspectionEnabled: true, tlsInspectionPorts: [originPort] }));
+    assert.strictEqual(config.status, 200);
+    const first = await interceptedGet(proxyPort, originPort, ca.body);
+    assert.strictEqual(first.status, 200, first.header);
+    assert.strictEqual(first.cache, 'MISS');
+    assert.strictEqual(first.body, 'secure-origin-1');
+    const second = await interceptedGet(proxyPort, originPort, ca.body);
+    assert.strictEqual(second.status, 200, second.header);
+    assert.strictEqual(second.cache, 'HIT');
+    assert.strictEqual(second.body, 'secure-origin-1');
+    assert.strictEqual(originCount, 1, 'HTTPS HIT must not reach upstream');
+
+    const caCertPath = path.join(dataDir, 'appdata', 'tls', 'rootCA.pem');
+    fs.writeFileSync(caCertPath, 'corrupted-certificate');
+    const repairedCa = await request(dashboardPort, '/api/tls/ca.pem');
+    assert.strictEqual(repairedCa.status, 200, 'invalid persisted CA must be regenerated');
+    assert.notStrictEqual(repairedCa.body, ca.body, 'CA rotation should replace invalid certificate material');
+    const afterRepair = await interceptedGet(proxyPort, originPort, repairedCa.body);
+    assert.strictEqual(afterRepair.status, 200, afterRepair.header);
+    assert.strictEqual(afterRepair.cache, 'HIT');
+    assert.strictEqual(afterRepair.body, 'secure-origin-1');
+    assert.strictEqual(originCount, 1, 'repairing CA must preserve valid cached HTTPS object');
+    console.log('TLS inspection + HTTPS cache MISS/HIT + CA corruption recovery: PASS');
+  } finally {
+    child.kill(); await new Promise(resolve => origin.close(resolve)); fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

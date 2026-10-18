@@ -1,15 +1,17 @@
 name: CEOAI Juwet Windows x64
 on:
   push:
-    branches: [main]
+    branches: [main, fix/cache-behavior-integration, feature/auto-generate-ca, fix/tls-revocation-bypass, fix/restore-source-for-testing]
   pull_request:
     branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: ceoai-juwet-build
-  cancel-in-progress: true
+  # Push and pull_request events can fire for the same commit. Keep builds
+  # isolated by ref and queue same-ref builds instead of cancelling validation.
+  group: ceoai-juwet-build-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: windows-latest
@@ -33,12 +35,14 @@ jobs:
       - name: Include source archive
         shell: pwsh
         run: |
-          Compress-Archive -Path public,desktop,server.js,tls-inspection.js,package.json,data,README.md,tests,.github,Launch-CEOAI-Juwet.vbs -DestinationPath dist\CEOAI-Juwet-Source.zip -Force
+          Copy-Item PETUNJUK-CA-HTTPS.txt dist\PETUNJUK-CA-HTTPS.txt -Force
+          Compress-Archive -Path public,desktop,server.js,tls-inspection.js,package.json,data,README.md,tests,.github,Launch-CEOAI-Juwet.vbs,PETUNJUK-CA-HTTPS.txt -DestinationPath dist\CEOAI-Juwet-Source.zip -Force
       - uses: actions/upload-artifact@v4
         with:
           name: CEOAI-Juwet-Windows-x64
           path: |
             dist/CEOAI-Juwet.exe
             dist/CEOAI-Juwet-Source.zip
+            dist/PETUNJUK-CA-HTTPS.txt
           if-no-files-found: error
           retention-days: 30
