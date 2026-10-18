@@ -195,6 +195,14 @@ function interceptedGet(proxyPort, originPort, caPem) {
     assert.strictEqual(fs.existsSync(path.join(dataDir, 'appdata', 'tls', 'rootCA.pem')), true, 'startup should create the Root CA certificate');
     const ca = await request(dashboardPort, '/api/tls/ca.pem');
     assert.strictEqual(ca.status, 200);
+    const tlsStatus = await request(dashboardPort, '/api/tls/status');
+    assert.strictEqual(tlsStatus.status, 200);
+    const activeFingerprint = JSON.parse(tlsStatus.body).ca.fingerprintSha256;
+    assert.match(activeFingerprint, /^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/, 'TLS status should expose a SHA-256 fingerprint for the active CA');
+    const activeCert = forge.pki.certificateFromPem(ca.body);
+    const activeDer = forge.asn1.toDer(forge.pki.certificateToAsn1(activeCert)).getBytes();
+    const downloadedFingerprint = require('crypto').createHash('sha256').update(activeDer, 'binary').digest('hex').toUpperCase().match(/.{2}/g).join(':');
+    assert.strictEqual(activeFingerprint, downloadedFingerprint, 'TLS status fingerprint must match the CA PEM actually served by the running executable');
     const config = await request(dashboardPort, '/api/config', 'POST', JSON.stringify({ tlsInspectionEnabled: true, tlsInspectionPorts: [originPort] }));
     assert.strictEqual(config.status, 200);
     const first = await interceptedGet(proxyPort, originPort, ca.body);
